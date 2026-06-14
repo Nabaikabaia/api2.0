@@ -1,38 +1,53 @@
-// music.js - COMPLETE Music Services (All working endpoints)
+// music.js - Complete Music Services (Fixed for Cloudflare Workers)
+// Services: Spotify Search, Apple Music, SoundCloud, Remusic AI
 
 import { CONFIG } from './config.js';
 import {
-  randomUUID, randomString, md5, sha256, randomIP,
-  parseSSE, fetchJSON, sleep, poll,
+  randomUUID, randomString, randomIP, md5, sha256,
+  parseSSE, sleep, fetchWithRetry, fetchJSON,
   sessionManager, buildHeaders, buildMobileHeaders,
   jsonResponse, errorResponse, successResponse
 } from './utils.js';
 
-// ==================== SPOTIFY SEARCH (WORKING) ====================
+// ==================== SPOTIFY SEARCH (FIXED - No Buffer) ====================
 
 export async function spotifySearch(query, limit = 5) {
   try {
-    // TOTP generation
     const secret = CONFIG.FALLBACKS.SPOTIFY_SECRET;
     const now = Date.now();
     const counter = Math.floor(now / 30000);
-    const buf = Buffer.alloc(8);
-    buf.writeBigInt64BE(BigInt(counter));
-    const digest = crypto.createHmac("sha1", secret).update(buf).digest();
+    
+    // Create 8-byte array for counter (BigInt -> bytes) - Cloudflare compatible
+    const buf = new Uint8Array(8);
+    let bigCounter = BigInt(counter);
+    for (let i = 7; i >= 0; i--) {
+      buf[i] = Number(bigCounter & 0xFFn);
+      bigCounter >>= 8n;
+    }
+    
+    // HMAC-SHA1 using Web Crypto API
+    const keyData = new TextEncoder().encode(secret);
+    const cryptoKey = await crypto.subtle.importKey(
+      'raw', keyData, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
+    );
+    const signature = await crypto.subtle.sign('HMAC', cryptoKey, buf);
+    const digest = new Uint8Array(signature);
+    
     const offset = digest[digest.length - 1] & 0xf;
-    const totp = ((digest.readUInt32BE(offset) & 0x7fffffff) % 1000000).toString().padStart(6, "0");
+    const totp = (((digest[offset] << 24) | (digest[offset + 1] << 16) | (digest[offset + 2] << 8) | digest[offset + 3]) & 0x7fffffff) % 1000000;
+    const totpStr = totp.toString().padStart(6, "0");
     
     // Get access token
-    const tokenRes = await fetch(`https://open.spotify.com/api/token?reason=init&totp=${totp}&totpVer=61&productType=web-player`, {
+    const tokenRes = await fetch(`https://open.spotify.com/api/token?reason=init&totp=${totpStr}&totpVer=61&productType=web-player`, {
       headers: { 'User-Agent': CONFIG.UA_DESKTOP, 'Origin': 'https://open.spotify.com' }
     });
     const tokenData = await tokenRes.json();
     
     if (!tokenData.accessToken) {
-      return { error: 'Spotify token failed', results: [] };
+      return { success: false, error: 'Spotify token failed', results: [] };
     }
     
-    // Search
+    // Search tracks
     const searchRes = await fetch(`https://api-partner.spotify.com/pathfinder/v1/query?operationName=searchDesktop&variables=${encodeURIComponent(JSON.stringify({
       searchTerm: query, offset: 0, limit: limit, numberOfTopResults: 1, includeAudiobooks: false
     }))}`, {
@@ -78,18 +93,18 @@ export async function spotifySearch(query, limit = 5) {
       });
     }
     
-    return { success: true, query, count: results.length, results, provider: 'spotify' };
+    return { success: true, query, count: results.length, results };
   } catch (error) {
-    return { success: false, error: error.message, results: [], provider: 'spotify' };
+    return { success: false, error: error.message, results: [] };
   }
 }
 
-// ==================== APPLE MUSIC SEARCH (WORKING) ====================
+// ==================== APPLE MUSIC SEARCH ====================
 
 export async function appleMusicSearch(query, limit = 5, region = 'us') {
   try {
     // Get token from web player
-    const webRes = await fetch('https://music.apple.com', {
+    const webRes = await fetch(CONFIG.ENDPOINTS.APPLE_MUSIC_WEB, {
       headers: { 'User-Agent': CONFIG.UA_DESKTOP }
     });
     const html = await webRes.text();
@@ -98,7 +113,7 @@ export async function appleMusicSearch(query, limit = 5, region = 'us') {
     const jsMatch = html.match(/src="(\/assets\/index-[^"]+\.js)"/);
     if (!jsMatch) return { success: false, error: 'JS bundle not found', results: [] };
     
-    const jsRes = await fetch('https://music.apple.com' + jsMatch[1], {
+    const jsRes = await fetch(CONFIG.ENDPOINTS.APPLE_MUSIC_WEB + jsMatch[1], {
       headers: { 'User-Agent': CONFIG.UA_DESKTOP }
     });
     const js = await jsRes.text();
@@ -108,11 +123,11 @@ export async function appleMusicSearch(query, limit = 5, region = 'us') {
     if (!tokenMatch) return { success: false, error: 'Token not found', results: [] };
     
     // Search
-    const searchRes = await fetch(`https://amp-api-edge.music.apple.com/v1/catalog/${region}/search?term=${encodeURIComponent(query)}&limit=${limit}&types=songs`, {
+    const searchRes = await fetch(`${CONFIG.ENDPOINTS.APPLE_MUSIC}/v1/catalog/${region}/search?term=${encodeURIComponent(query)}&limit=${limit}&types=songs`, {
       headers: {
         'Authorization': `Bearer ${tokenMatch[0]}`,
-        'Origin': 'https://music.apple.com',
-        'Referer': 'https://music.apple.com/',
+        'Origin': CONFIG.ENDPOINTS.APPLE_MUSIC_WEB,
+        'Referer': CONFIG.ENDPOINTS.APPLE_MUSIC_WEB + '/',
         'User-Agent': CONFIG.UA_DESKTOP
       }
     });
@@ -131,29 +146,29 @@ export async function appleMusicSearch(query, limit = 5, region = 'us') {
       url: song.attributes?.url
     }));
     
-    return { success: true, query, region, count: results.length, results, provider: 'apple_music' };
+    return { success: true, query, region, count: results.length, results };
   } catch (error) {
-    return { success: false, error: error.message, results: [], provider: 'apple_music' };
+    return { success: false, error: error.message, results: [] };
   }
 }
 
-// ==================== SOUNDCLOUD SEARCH (WORKING) ====================
+// ==================== SOUNDCLOUD SEARCH ====================
 
 export async function soundcloudSearch(query, limit = 5) {
   try {
-    // Get client_id
-    const homeRes = await fetch('https://soundcloud.com', {
-      headers: { 'User-Agent': CONFIG.UA_MOBILE }
+    // Get client_id from homepage
+    const homeRes = await fetch(CONFIG.ENDPOINTS.SOUNDCLOUD_WEB, {
+      headers: buildMobileHeaders()
     });
     const html = await homeRes.text();
     
     let clientId = CONFIG.FALLBACKS.SOUNDCLOUD_CLIENT_ID;
-    const match = html.match(/"client_id":"([a-zA-Z0-9]+)"/);
-    if (match) clientId = match[1];
+    const clientIdMatch = html.match(/"client_id":"([a-zA-Z0-9]+)"/);
+    if (clientIdMatch) clientId = clientIdMatch[1];
     
-    // Search
-    const searchRes = await fetch(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&limit=${limit}&client_id=${clientId}`, {
-      headers: { 'User-Agent': CONFIG.UA_MOBILE }
+    // Search tracks
+    const searchRes = await fetch(`${CONFIG.ENDPOINTS.SOUNDCLOUD_API}/search/tracks?q=${encodeURIComponent(query)}&limit=${limit}&client_id=${clientId}&linked_partitioning=1&app_version=1774459502&app_locale=en`, {
+      headers: buildMobileHeaders()
     });
     
     const data = await searchRes.json();
@@ -171,7 +186,7 @@ export async function soundcloudSearch(query, limit = 5) {
         if (target?.url) {
           try {
             const streamRes = await fetch(`${target.url}?client_id=${clientId}`, {
-              headers: { 'User-Agent': CONFIG.UA_MOBILE }
+              headers: buildMobileHeaders()
             });
             const streamData = await streamRes.json();
             streamUrl = streamData.url;
@@ -192,13 +207,13 @@ export async function soundcloudSearch(query, limit = 5) {
       });
     }
     
-    return { success: true, query, count: results.length, results, provider: 'soundcloud' };
+    return { success: true, query, count: results.length, results };
   } catch (error) {
-    return { success: false, error: error.message, results: [], provider: 'soundcloud' };
+    return { success: false, error: error.message, results: [] };
   }
 }
 
-// ==================== REMUSIC AI (WORKING) ====================
+// ==================== REMUSIC AI MUSIC GENERATION ====================
 
 export async function remusicGenerate(prompt, options = {}) {
   const { styles = [], title = null, lyrics = null } = options;
@@ -211,14 +226,14 @@ export async function remusicGenerate(prompt, options = {}) {
     const headers = {
       'accept': 'application/json',
       'content-type': 'application/json',
-      'origin': 'https://remusic.ai',
-      'referer': 'https://remusic.ai/ai-music-generator',
+      'origin': CONFIG.ENDPOINTS.REMUSIC_WEB,
+      'referer': `${CONFIG.ENDPOINTS.REMUSIC_WEB}/ai-music-generator`,
       'user-agent': CONFIG.UA_DESKTOP,
       'cookie': `_ga=${freshGa}; anonymous_user_id=${anonymousId}`,
       'x-forwarded-for': randomIP()
     };
     
-    // Create job
+    // Build request body
     const body = title || lyrics ? {
       mode: 2, supplier: 10, mv: 'v4', is_instrumental: false, is_public: true,
       prompt: String(prompt || tags || title), title: title || '', tags, lyrics: lyrics || ''
@@ -227,7 +242,8 @@ export async function remusicGenerate(prompt, options = {}) {
       prompt: tags ? `${prompt}, ${tags}` : String(prompt)
     };
     
-    const createRes = await fetch('https://remusic.ai/api/v1/ai-music/music', {
+    // Create job
+    const createRes = await fetch(`${CONFIG.ENDPOINTS.REMUSIC_API}/music`, {
       method: 'POST', headers, body: JSON.stringify(body)
     });
     const createData = await createRes.json();
@@ -243,7 +259,7 @@ export async function remusicGenerate(prompt, options = {}) {
     for (let i = 0; i < 60; i++) {
       await sleep(5000);
       
-      const pollRes = await fetch(`https://remusic.ai/api/v1/ai-music/music/${songId}`, { headers });
+      const pollRes = await fetch(`${CONFIG.ENDPOINTS.REMUSIC_API}/music/${songId}`, { headers });
       const pollData = await pollRes.json();
       const row = pollData?.data;
       
@@ -265,27 +281,28 @@ export async function remusicGenerate(prompt, options = {}) {
     
     if (!song) return { success: false, error: 'Timeout' };
     
-    return { success: true, song, provider: 'remusic' };
+    return { success: true, song };
   } catch (error) {
     return { success: false, error: error.message };
   }
 }
 
-// ==================== SOUNDCLOUD DOWNLOADER (WORKING) ====================
+// ==================== SOUNDCLOUD DOWNLOADER ====================
 
 export async function soundcloudDownload(url) {
   try {
     // Get initial page
     const pageRes = await fetch('https://downcloudme.com/download-track', {
-      headers: { 'User-Agent': CONFIG.UA_MOBILE, 'Accept': 'text/html' }
+      headers: buildMobileHeaders({ 'Accept': 'text/html' })
     });
     const html = await pageRes.text();
     const cookies = pageRes.headers.getSetCookie?.()?.map(c => c.split(';')[0]).join('; ') || '';
     
+    // Extract nonce
     const nonce = html.match(/name="downloader_verify"\s+value="([^"]+)"/)?.[1];
     if (!nonce) return { success: false, error: 'Nonce not found' };
     
-    // Submit
+    // Submit form
     const form = new URLSearchParams();
     form.set('url', url);
     form.set('downloader_verify', nonce);
@@ -308,7 +325,7 @@ export async function soundcloudDownload(url) {
     
     if (!dlUrl) return { success: false, error: 'Download URL not found' };
     
-    return { success: true, download_url: dlUrl, provider: 'downcloudme' };
+    return { success: true, download_url: dlUrl };
   } catch (error) {
     return { success: false, error: error.message };
   }
