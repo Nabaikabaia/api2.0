@@ -1,4 +1,4 @@
-// utils.js - Complete Utilities for All Services
+// utils.js - Complete Utilities with Auto Pretty Print & Custom Response Wrapper
 
 import { CONFIG } from './config.js';
 
@@ -21,31 +21,50 @@ export const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex")
 
 export const sha1 = (s) => crypto.createHash("sha1").update(s).digest("hex");
 
-export const base64Encode = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64");
+export const base64Encode = (obj) => {
+  const str = JSON.stringify(obj);
+  return btoa(String.fromCharCode(...new TextEncoder().encode(str)));
+};
 
 export const base64Decode = (str) => {
   try {
-    return JSON.parse(Buffer.from(str, "base64").toString());
+    const binary = atob(str);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return JSON.parse(new TextDecoder().decode(bytes));
   } catch {
     return null;
   }
 };
 
-export const generateRandomHex = (bytes) => crypto.randomBytes(bytes).toString("hex");
-
-// ==================== AES & RSA ENCRYPTION ====================
-
-export const aesEncrypt = (plain, secret) => {
-  const cipher = crypto.createCipheriv("aes-128-cbc", Buffer.from(secret, "utf8"), Buffer.from(secret, "utf8"));
-  return Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]).toString("base64");
+export const generateRandomHex = (bytes) => {
+  const arr = new Uint8Array(bytes);
+  crypto.getRandomValues(arr);
+  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
-export const rsaEncrypt = (plain, publicKey) => {
-  return crypto.publicEncrypt(
-    { key: publicKey, padding: crypto.constants.RSA_PKCS1_PADDING },
-    Buffer.from(plain, "utf8")
-  ).toString("base64");
-};
+// ==================== AES & RSA ENCRYPTION (Cloudflare Compatible) ====================
+
+export async function aesEncrypt(plain, secret) {
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(secret);
+  const cryptoKey = await crypto.subtle.importKey(
+    'raw', keyData, { name: 'AES-CBC', length: 128 }, false, ['encrypt']
+  );
+  const iv = encoder.encode(secret.slice(0, 16));
+  const encrypted = await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, cryptoKey, encoder.encode(plain));
+  return btoa(String.fromCharCode(...new Uint8Array(encrypted)));
+}
+
+export async function rsaEncrypt(plain, publicKeyPem) {
+  const pemHeader = "-----BEGIN PUBLIC KEY-----";
+  const pemFooter = "-----END PUBLIC KEY-----";
+  const pemContents = publicKeyPem.replace(pemHeader, '').replace(pemFooter, '').replace(/\s/g, '');
+  const binaryKey = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0));
+  const cryptoKey = await crypto.subtle.importKey('spki', binaryKey, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
+  const encrypted = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, cryptoKey, new TextEncoder().encode(plain));
+  return btoa(String.fromCharCode(...new Uint8Array(encrypted)));
+}
 
 // ==================== SSE (Server-Sent Events) PARSER ====================
 
@@ -75,7 +94,6 @@ export async function parseSSE(response, options = {}) {
         try {
           const data = JSON.parse(jsonStr);
           
-          // Handle different response formats
           let delta = null;
           if (data.delta) delta = data.delta;
           if (data.choices?.[0]?.delta?.content) delta = data.choices[0].delta.content;
@@ -104,13 +122,12 @@ export async function fetchWithRetry(url, options = {}, maxRetries = 3) {
       const response = await fetch(url, options);
       if (response.ok) return response;
       
-      // Don't retry client errors (4xx except 429)
       if (response.status >= 400 && response.status < 500 && response.status !== 429) {
         return response;
       }
       
       lastError = `HTTP ${response.status}`;
-      await sleep(1000 * (i + 1)); // Exponential backoff
+      await sleep(1000 * (i + 1));
     } catch (error) {
       lastError = error.message;
       if (i < maxRetries - 1) await sleep(1000 * (i + 1));
@@ -141,7 +158,6 @@ class SessionManager {
     const session = this.store.get(id);
     if (!session) return null;
     
-    // Check expiration
     if (session.expiresAt && Date.now() > session.expiresAt) {
       this.store.delete(id);
       return null;
@@ -150,7 +166,7 @@ class SessionManager {
     return session;
   }
   
-  set(id, data, ttlMs = CONFIG.LIMITS.SESSION_TTL_MS) {
+  set(id, data, ttlMs = CONFIG.LIMITS?.SESSION_TTL_MS || 3600000) {
     this.store.set(id, {
       ...data,
       expiresAt: Date.now() + ttlMs,
@@ -159,7 +175,7 @@ class SessionManager {
     return id;
   }
   
-  create(data, ttlMs = CONFIG.LIMITS.SESSION_TTL_MS) {
+  create(data, ttlMs = CONFIG.LIMITS?.SESSION_TTL_MS || 3600000) {
     const id = randomUUID();
     this.store.set(id, {
       ...data,
@@ -177,7 +193,6 @@ class SessionManager {
     this.store.clear();
   }
   
-  // Clean expired sessions
   cleanup() {
     const now = Date.now();
     for (const [id, session] of this.store) {
@@ -190,64 +205,48 @@ class SessionManager {
 
 export const sessionManager = new SessionManager();
 
-// ==================== COOKIE MANAGER ====================
+// ==================== RESPONSE FORMATTERS (AUTO PRETTY PRINT) ====================
 
-export function parseSetCookie(setCookie) {
-  if (!setCookie) return null;
+export function jsonResponse(data, status = 200) {
+  // Wrap response with NABEES branding
+  const wrappedResponse = {
+    status_code: status,
+    creator: "NABEES",
+    provider: "NABEES TECH NAIJA DEVOPS",
+    country: "Nigeria",
+    whatsapp_channel: "https://whatsapp.com/channel/0029VawtjOXJpe8X3j3NCZ3j",
+    timestamp: Date.now(),
+    data: data
+  };
   
-  const cookies = {};
-  const parts = setCookie.split(';');
+  // ALWAYS pretty print with 2-space indentation
+  const jsonString = JSON.stringify(wrappedResponse, null, 2);
   
-  for (const part of parts) {
-    const [key, value] = part.trim().split('=');
-    if (key && value) cookies[key] = value;
-  }
-  
-  return cookies;
-}
-
-export function mergeCookies(existingCookies, newCookie) {
-  const cookieMap = new Map();
-  
-  if (existingCookies) {
-    existingCookies.split('; ').forEach(cookie => {
-      const [name, value] = cookie.split('=');
-      if (name) cookieMap.set(name, value);
-    });
-  }
-  
-  if (newCookie) {
-    const [name, value] = newCookie.split('=');
-    if (name) cookieMap.set(name, value);
-  }
-  
-  return Array.from(cookieMap.entries())
-    .map(([name, value]) => `${name}=${value}`)
-    .join('; ');
-}
-
-// ==================== RESPONSE FORMATTERS ====================
-
-export function jsonResponse(data, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(data), {
+  return new Response(jsonString, {
     status,
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Cookie, Authorization',
-      ...extraHeaders
+      'Access-Control-Allow-Headers': 'Content-Type, Cookie, Authorization'
     }
   });
 }
 
 export function errorResponse(message, status = 500) {
-  return jsonResponse({ error: message, timestamp: Date.now() }, status);
+  return jsonResponse({ 
+    success: false, 
+    error: message 
+  }, status);
 }
 
 export function successResponse(data, message = "success") {
-  return jsonResponse({ success: true, message, data, timestamp: Date.now() });
+  return jsonResponse({ 
+    success: true, 
+    message, 
+    data 
+  }, 200);
 }
 
 // ==================== URL VALIDATORS ====================
@@ -325,8 +324,8 @@ export function buildMobileHeaders(customHeaders = {}, cookies = null) {
 
 export async function poll(fn, options = {}) {
   const {
-    maxAttempts = CONFIG.LIMITS.MAX_POLL_ATTEMPTS,
-    interval = CONFIG.LIMITS.POLL_INTERVAL_MS,
+    maxAttempts = CONFIG.LIMITS?.MAX_POLL_ATTEMPTS || 30,
+    interval = CONFIG.LIMITS?.POLL_INTERVAL_MS || 5000,
     onProgress = null
   } = options;
   
@@ -363,19 +362,19 @@ export function getImageDimensions(buffer) {
       const marker = buffer[offset + 1];
       if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
         return {
-          height: buffer.readUInt16BE(offset + 5),
-          width: buffer.readUInt16BE(offset + 7)
+          height: (buffer[offset + 5] << 8) | buffer[offset + 6],
+          width: (buffer[offset + 7] << 8) | buffer[offset + 8]
         };
       }
-      offset += 2 + buffer.readUInt16BE(offset + 2);
+      offset += 2 + ((buffer[offset + 2] << 8) | buffer[offset + 3]);
     }
   }
   
   // PNG
-  if (buffer.slice(1, 4).toString() === "PNG") {
+  if (buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
     return {
-      width: buffer.readUInt32BE(16),
-      height: buffer.readUInt32BE(20)
+      width: (buffer[16] << 24) | (buffer[17] << 16) | (buffer[18] << 8) | buffer[19],
+      height: (buffer[20] << 24) | (buffer[21] << 16) | (buffer[22] << 8) | buffer[23]
     };
   }
   
@@ -397,6 +396,42 @@ export function randomNumber(min = 100000, max = 999999) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// ==================== COOKIE MANAGER ====================
+
+export function parseSetCookie(setCookie) {
+  if (!setCookie) return null;
+  
+  const cookies = {};
+  const parts = setCookie.split(';');
+  
+  for (const part of parts) {
+    const [key, value] = part.trim().split('=');
+    if (key && value) cookies[key] = value;
+  }
+  
+  return cookies;
+}
+
+export function mergeCookies(existingCookies, newCookie) {
+  const cookieMap = new Map();
+  
+  if (existingCookies) {
+    existingCookies.split('; ').forEach(cookie => {
+      const [name, value] = cookie.split('=');
+      if (name) cookieMap.set(name, value);
+    });
+  }
+  
+  if (newCookie) {
+    const [name, value] = newCookie.split('=');
+    if (name) cookieMap.set(name, value);
+  }
+  
+  return Array.from(cookieMap.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
 // ==================== EXPORT ALL ====================
 
 export default {
@@ -416,8 +451,6 @@ export default {
   fetchJSON,
   sleep,
   sessionManager,
-  parseSetCookie,
-  mergeCookies,
   jsonResponse,
   errorResponse,
   successResponse,
@@ -430,5 +463,7 @@ export default {
   poll,
   getImageDimensions,
   randomString,
-  randomNumber
+  randomNumber,
+  parseSetCookie,
+  mergeCookies
 };
