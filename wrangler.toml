@@ -1,20 +1,13 @@
-# wrangler.toml - Cloudflare Worker Configuration
-
-name = "nabees-apis"
+name = "nabees-api"
 main = "worker.js"
 compatibility_date = "2024-12-18"
 
-# Environment variables (optional)
 [vars]
 ENVIRONMENT = "production"
 
-# Observability
 [observability]
 enabled = true
 head_sampling_rate = 0.1
 
-# Limits
-[limits]
-cpu_ms = 50
-subrequest_limit = 50
-
+[dev]
+port = 8787
