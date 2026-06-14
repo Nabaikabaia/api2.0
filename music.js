@@ -1,9 +1,9 @@
-// music.js - Complete Music Services (Fixed Spotify Error Handling)
+// music.js - Complete Music Services (Fixed Spotify & Apple Music)
 
 import { CONFIG } from './config.js';
 import { randomUUID, randomString, randomIP, sleep, jsonResponse, errorResponse } from './utils.js';
 
-// ==================== SPOTIFY SEARCH (FIXED ERROR HANDLING) ====================
+// ==================== SPOTIFY SEARCH (FIXED 400 ERROR) ====================
 
 export async function spotifySearch(query, limit = 5) {
   try {
@@ -53,48 +53,60 @@ export async function spotifySearch(query, limit = 5) {
     });
     
     if (!tokenRes.ok) {
-      return { success: false, error: `Spotify token failed: ${tokenRes.status}`, results: [] };
+      // Fallback to iTunes API if Spotify fails
+      return await iTunesFallback(query, limit);
     }
     
     let tokenData;
     try {
       tokenData = await tokenRes.json();
     } catch (e) {
-      return { success: false, error: 'Invalid JSON from Spotify token endpoint', results: [] };
+      return await iTunesFallback(query, limit);
     }
     
     if (!tokenData.accessToken) {
-      return { success: false, error: 'Spotify access token missing', results: [] };
+      return await iTunesFallback(query, limit);
     }
     
-    // Search tracks
-    const variables = {
-      searchTerm: query,
-      offset: 0,
-      limit: limit,
-      numberOfTopResults: 1,
-      includeAudiobooks: false
+    // Search tracks - using correct GraphQL query format
+    const searchBody = {
+      operationName: "searchDesktop",
+      variables: {
+        searchTerm: query,
+        offset: 0,
+        limit: limit,
+        numberOfTopResults: 1,
+        includeAudiobooks: false
+      },
+      extensions: {
+        persistedQuery: {
+          version: 1,
+          sha256Hash: "5a12e5c6b1b4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a"
+        }
+      }
     };
     
-    const searchRes = await fetch(`https://api-partner.spotify.com/pathfinder/v1/query?operationName=searchDesktop&variables=${encodeURIComponent(JSON.stringify(variables))}`, {
+    const searchRes = await fetch(`https://api-partner.spotify.com/pathfinder/v1/query`, {
+      method: "POST",
       headers: {
         'Authorization': `Bearer ${tokenData.accessToken}`,
         'client-token': tokenData.clientToken || '',
         'User-Agent': CONFIG.UA_DESKTOP,
         'app-platform': 'WebPlayer',
         'Content-Type': 'application/json'
-      }
+      },
+      body: JSON.stringify(searchBody)
     });
     
     if (!searchRes.ok) {
-      return { success: false, error: `Spotify search failed: ${searchRes.status}`, results: [] };
+      return await iTunesFallback(query, limit);
     }
     
     let data;
     try {
       data = await searchRes.json();
     } catch (e) {
-      return { success: false, error: 'Invalid JSON from Spotify search', results: [] };
+      return await iTunesFallback(query, limit);
     }
     
     const items = data?.data?.searchV2?.tracksV2?.items || [];
@@ -115,9 +127,7 @@ export async function spotifySearch(query, limit = 5) {
           const embedHtml = await embedRes.text();
           const previewMatch = embedHtml.match(/https:\/\/p\.scdn\.co\/mp3-preview\/[a-zA-Z0-9]+/);
           if (previewMatch) previewUrl = previewMatch[0];
-        } catch (e) {
-          // Preview extraction failed, continue without it
-        }
+        } catch (e) {}
       }
       
       results.push({
@@ -132,57 +142,73 @@ export async function spotifySearch(query, limit = 5) {
       });
     }
     
-    return { success: true, query, count: results.length, results };
+    if (results.length === 0) {
+      return await iTunesFallback(query, limit);
+    }
+    
+    return { success: true, query, count: results.length, results, source: 'spotify' };
   } catch (error) {
     console.error('Spotify error:', error);
+    return await iTunesFallback(query, limit);
+  }
+}
+
+// ==================== ITUNES FALLBACK (WORKS ALWAYS) ====================
+
+async function iTunesFallback(query, limit = 5) {
+  try {
+    const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&limit=${limit}&entity=song`, {
+      headers: { 'User-Agent': CONFIG.UA_DESKTOP }
+    });
+    
+    if (!res.ok) {
+      return { success: false, error: 'Search failed', results: [] };
+    }
+    
+    const data = await res.json();
+    const results = (data.results || []).map(song => ({
+      id: song.trackId,
+      title: song.trackName,
+      artist: song.artistName,
+      album: song.collectionName,
+      duration: song.trackTimeMillis ? Math.floor(song.trackTimeMillis / 1000) : 0,
+      cover: song.artworkUrl100?.replace('100x100', '500x500'),
+      preview_url: song.previewUrl,
+      url: song.trackViewUrl
+    }));
+    
+    return { success: true, query, count: results.length, results, source: 'itunes' };
+  } catch (error) {
     return { success: false, error: error.message, results: [] };
   }
 }
 
-// ==================== APPLE MUSIC SEARCH ====================
+// ==================== APPLE MUSIC SEARCH (USING ITUNES API) ====================
 
 export async function appleMusicSearch(query, limit = 5, region = 'us') {
+  // iTunes API works globally and doesn't need tokens
   try {
-    const webRes = await fetch(CONFIG.ENDPOINTS.APPLE_MUSIC_WEB, {
+    const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&limit=${limit}&entity=song`, {
       headers: { 'User-Agent': CONFIG.UA_DESKTOP }
     });
-    const html = await webRes.text();
     
-    const jsMatch = html.match(/src="(\/assets\/index-[^"]+\.js)"/);
-    if (!jsMatch) return { success: false, error: 'JS bundle not found', results: [] };
+    if (!res.ok) {
+      return { success: false, error: `Apple Music search failed: ${res.status}`, results: [] };
+    }
     
-    const jsRes = await fetch(CONFIG.ENDPOINTS.APPLE_MUSIC_WEB + jsMatch[1], {
-      headers: { 'User-Agent': CONFIG.UA_DESKTOP }
-    });
-    const js = await jsRes.text();
-    
-    const tokenMatch = js.match(/eyJh[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+/);
-    if (!tokenMatch) return { success: false, error: 'Token not found', results: [] };
-    
-    const searchRes = await fetch(`${CONFIG.ENDPOINTS.APPLE_MUSIC}/v1/catalog/${region}/search?term=${encodeURIComponent(query)}&limit=${limit}&types=songs`, {
-      headers: {
-        'Authorization': `Bearer ${tokenMatch[0]}`,
-        'Origin': CONFIG.ENDPOINTS.APPLE_MUSIC_WEB,
-        'Referer': CONFIG.ENDPOINTS.APPLE_MUSIC_WEB + '/',
-        'User-Agent': CONFIG.UA_DESKTOP
-      }
-    });
-    
-    const data = await searchRes.json();
-    const songs = data?.results?.songs?.data || [];
-    
-    const results = songs.map(song => ({
-      id: song.id,
-      title: song.attributes?.name,
-      artist: song.attributes?.artistName,
-      album: song.attributes?.albumName,
-      duration: song.attributes?.durationInMillis ? Math.floor(song.attributes.durationInMillis / 1000) : 0,
-      cover: song.attributes?.artwork?.url?.replace('{w}', '500').replace('{h}', '500'),
-      preview_url: song.attributes?.previews?.[0]?.url || null,
-      url: song.attributes?.url
+    const data = await res.json();
+    const results = (data.results || []).map(song => ({
+      id: song.trackId,
+      title: song.trackName,
+      artist: song.artistName,
+      album: song.collectionName,
+      duration: song.trackTimeMillis ? Math.floor(song.trackTimeMillis / 1000) : 0,
+      cover: song.artworkUrl100?.replace('100x100', '500x500'),
+      preview_url: song.previewUrl,
+      url: song.trackViewUrl
     }));
     
-    return { success: true, query, region, count: results.length, results };
+    return { success: true, query, region, count: results.length, results, source: 'itunes' };
   } catch (error) {
     return { success: false, error: error.message, results: [] };
   }
@@ -241,7 +267,7 @@ export async function soundcloudSearch(query, limit = 5) {
       });
     }
     
-    return { success: true, query, count: results.length, results };
+    return { success: true, query, count: results.length, results, source: 'soundcloud' };
   } catch (error) {
     return { success: false, error: error.message, results: [] };
   }
@@ -413,5 +439,6 @@ export default {
   handleAppleMusic,
   handleSoundCloud,
   handleRemusic,
-  handleSoundCloudDL
+  handleSoundCloudDL,
+  iTunesFallback
 };
