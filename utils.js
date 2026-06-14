@@ -1,0 +1,434 @@
+// utils.js - Complete Utilities for All Services
+
+import { CONFIG } from './config.js';
+
+// ==================== CRYPTO & ID GENERATORS ====================
+
+export const randomId = (len = 7) => {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let s = "";
+  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+};
+
+export const randomUUID = () => crypto.randomUUID();
+
+export const randomIP = () => Array.from({ length: 4 }, () => 1 + Math.floor(Math.random() * 254)).join(".");
+
+export const md5 = (s) => crypto.createHash("md5").update(s).digest("hex");
+
+export const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex");
+
+export const sha1 = (s) => crypto.createHash("sha1").update(s).digest("hex");
+
+export const base64Encode = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64");
+
+export const base64Decode = (str) => {
+  try {
+    return JSON.parse(Buffer.from(str, "base64").toString());
+  } catch {
+    return null;
+  }
+};
+
+export const generateRandomHex = (bytes) => crypto.randomBytes(bytes).toString("hex");
+
+// ==================== AES & RSA ENCRYPTION ====================
+
+export const aesEncrypt = (plain, secret) => {
+  const cipher = crypto.createCipheriv("aes-128-cbc", Buffer.from(secret, "utf8"), Buffer.from(secret, "utf8"));
+  return Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]).toString("base64");
+};
+
+export const rsaEncrypt = (plain, publicKey) => {
+  return crypto.publicEncrypt(
+    { key: publicKey, padding: crypto.constants.RSA_PKCS1_PADDING },
+    Buffer.from(plain, "utf8")
+  ).toString("base64");
+};
+
+// ==================== SSE (Server-Sent Events) PARSER ====================
+
+export async function parseSSE(response, options = {}) {
+  const { onDelta, onComplete } = options;
+  
+  if (!response.ok || !response.body) return "";
+  
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let fullReply = "";
+  
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+    
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        const jsonStr = line.substring(6);
+        if (jsonStr === "[DONE]") continue;
+        
+        try {
+          const data = JSON.parse(jsonStr);
+          
+          // Handle different response formats
+          let delta = null;
+          if (data.delta) delta = data.delta;
+          if (data.choices?.[0]?.delta?.content) delta = data.choices[0].delta.content;
+          if (data.content) delta = data.content;
+          
+          if (delta) {
+            fullReply += delta;
+            if (onDelta) onDelta(delta);
+          }
+        } catch (e) {}
+      }
+    }
+  }
+  
+  if (onComplete) onComplete(fullReply);
+  return fullReply.trim();
+}
+
+// ==================== FETCH WITH RETRY ====================
+
+export async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+  let lastError = null;
+  
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const response = await fetch(url, options);
+      if (response.ok) return response;
+      
+      // Don't retry client errors (4xx except 429)
+      if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+        return response;
+      }
+      
+      lastError = `HTTP ${response.status}`;
+      await sleep(1000 * (i + 1)); // Exponential backoff
+    } catch (error) {
+      lastError = error.message;
+      if (i < maxRetries - 1) await sleep(1000 * (i + 1));
+    }
+  }
+  
+  throw new Error(`Failed after ${maxRetries} retries: ${lastError}`);
+}
+
+export async function fetchJSON(url, options = {}, maxRetries = 3) {
+  const response = await fetchWithRetry(url, options, maxRetries);
+  if (!response.ok) return null;
+  return response.json().catch(() => null);
+}
+
+// ==================== SLEEP / DELAY ====================
+
+export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+// ==================== SESSION MANAGER ====================
+
+class SessionManager {
+  constructor() {
+    this.store = new Map();
+  }
+  
+  get(id) {
+    const session = this.store.get(id);
+    if (!session) return null;
+    
+    // Check expiration
+    if (session.expiresAt && Date.now() > session.expiresAt) {
+      this.store.delete(id);
+      return null;
+    }
+    
+    return session;
+  }
+  
+  set(id, data, ttlMs = CONFIG.LIMITS.SESSION_TTL_MS) {
+    this.store.set(id, {
+      ...data,
+      expiresAt: Date.now() + ttlMs,
+      updatedAt: Date.now()
+    });
+    return id;
+  }
+  
+  create(data, ttlMs = CONFIG.LIMITS.SESSION_TTL_MS) {
+    const id = randomUUID();
+    this.store.set(id, {
+      ...data,
+      expiresAt: Date.now() + ttlMs,
+      createdAt: Date.now()
+    });
+    return id;
+  }
+  
+  delete(id) {
+    this.store.delete(id);
+  }
+  
+  clear() {
+    this.store.clear();
+  }
+  
+  // Clean expired sessions
+  cleanup() {
+    const now = Date.now();
+    for (const [id, session] of this.store) {
+      if (session.expiresAt && now > session.expiresAt) {
+        this.store.delete(id);
+      }
+    }
+  }
+}
+
+export const sessionManager = new SessionManager();
+
+// ==================== COOKIE MANAGER ====================
+
+export function parseSetCookie(setCookie) {
+  if (!setCookie) return null;
+  
+  const cookies = {};
+  const parts = setCookie.split(';');
+  
+  for (const part of parts) {
+    const [key, value] = part.trim().split('=');
+    if (key && value) cookies[key] = value;
+  }
+  
+  return cookies;
+}
+
+export function mergeCookies(existingCookies, newCookie) {
+  const cookieMap = new Map();
+  
+  if (existingCookies) {
+    existingCookies.split('; ').forEach(cookie => {
+      const [name, value] = cookie.split('=');
+      if (name) cookieMap.set(name, value);
+    });
+  }
+  
+  if (newCookie) {
+    const [name, value] = newCookie.split('=');
+    if (name) cookieMap.set(name, value);
+  }
+  
+  return Array.from(cookieMap.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
+// ==================== RESPONSE FORMATTERS ====================
+
+export function jsonResponse(data, status = 200, extraHeaders = {}) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Cookie, Authorization',
+      ...extraHeaders
+    }
+  });
+}
+
+export function errorResponse(message, status = 500) {
+  return jsonResponse({ error: message, timestamp: Date.now() }, status);
+}
+
+export function successResponse(data, message = "success") {
+  return jsonResponse({ success: true, message, data, timestamp: Date.now() });
+}
+
+// ==================== URL VALIDATORS ====================
+
+export function isValidUrl(string) {
+  try {
+    new URL(string);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function extractDomain(url) {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname.replace(/^www\./, '');
+  } catch {
+    return null;
+  }
+}
+
+// ==================== FORMATTERS ====================
+
+export function formatDuration(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+export function formatFileSize(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// ==================== HEADER BUILDERS ====================
+
+export function buildHeaders(customHeaders = {}, cookies = null) {
+  const headers = {
+    'User-Agent': CONFIG.UA_DESKTOP,
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    ...customHeaders
+  };
+  
+  if (cookies) {
+    headers['Cookie'] = cookies;
+  }
+  
+  return headers;
+}
+
+export function buildMobileHeaders(customHeaders = {}, cookies = null) {
+  const headers = {
+    'User-Agent': CONFIG.UA_MOBILE,
+    'Accept': '*/*',
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Sec-Ch-Ua-Mobile': '?1',
+    ...customHeaders
+  };
+  
+  if (cookies) {
+    headers['Cookie'] = cookies;
+  }
+  
+  return headers;
+}
+
+// ==================== POLLING UTILITY ====================
+
+export async function poll(fn, options = {}) {
+  const {
+    maxAttempts = CONFIG.LIMITS.MAX_POLL_ATTEMPTS,
+    interval = CONFIG.LIMITS.POLL_INTERVAL_MS,
+    onProgress = null
+  } = options;
+  
+  for (let i = 0; i < maxAttempts; i++) {
+    const result = await fn(i);
+    
+    if (onProgress) onProgress(i, result);
+    
+    if (result && (result.success === true || result.status === 'success' || result.done === true)) {
+      return result;
+    }
+    
+    if (result && (result.error || result.status === 'failed')) {
+      throw new Error(result.error || 'Polling failed');
+    }
+    
+    if (i < maxAttempts - 1) await sleep(interval);
+  }
+  
+  throw new Error('Polling timeout after ' + maxAttempts + ' attempts');
+}
+
+// ==================== IMAGE DIMENSIONS ====================
+
+export function getImageDimensions(buffer) {
+  // JPEG
+  if (buffer[0] === 0xff && buffer[1] === 0xd8) {
+    let offset = 2;
+    while (offset < buffer.length) {
+      if (buffer[offset] !== 0xff) {
+        offset++;
+        continue;
+      }
+      const marker = buffer[offset + 1];
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+        return {
+          height: buffer.readUInt16BE(offset + 5),
+          width: buffer.readUInt16BE(offset + 7)
+        };
+      }
+      offset += 2 + buffer.readUInt16BE(offset + 2);
+    }
+  }
+  
+  // PNG
+  if (buffer.slice(1, 4).toString() === "PNG") {
+    return {
+      width: buffer.readUInt32BE(16),
+      height: buffer.readUInt32BE(20)
+    };
+  }
+  
+  return { width: 0, height: 0 };
+}
+
+// ==================== RANDOM STRING GENERATORS ====================
+
+export function randomString(length = 16) {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let result = "";
+  for (let i = 0; i < length; i++) {
+    result += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return result;
+}
+
+export function randomNumber(min = 100000, max = 999999) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+// ==================== EXPORT ALL ====================
+
+export default {
+  randomId,
+  randomUUID,
+  randomIP,
+  md5,
+  sha256,
+  sha1,
+  base64Encode,
+  base64Decode,
+  generateRandomHex,
+  aesEncrypt,
+  rsaEncrypt,
+  parseSSE,
+  fetchWithRetry,
+  fetchJSON,
+  sleep,
+  sessionManager,
+  parseSetCookie,
+  mergeCookies,
+  jsonResponse,
+  errorResponse,
+  successResponse,
+  isValidUrl,
+  extractDomain,
+  formatDuration,
+  formatFileSize,
+  buildHeaders,
+  buildMobileHeaders,
+  poll,
+  getImageDimensions,
+  randomString,
+  randomNumber
+};
