@@ -1,14 +1,17 @@
-// music.js - Complete Music Services (Fixed Spotify - reads CONFIG.SPOTIFY_SECRET directly)
+// music.js - Complete Music Services (Fixed Spotify Error Handling)
 
 import { CONFIG } from './config.js';
 import { randomUUID, randomString, randomIP, sleep, jsonResponse, errorResponse } from './utils.js';
 
-// ==================== SPOTIFY SEARCH (FIXED) ====================
+// ==================== SPOTIFY SEARCH (FIXED ERROR HANDLING) ====================
 
 export async function spotifySearch(query, limit = 5) {
   try {
-    // Read SPOTIFY_SECRET from root level of CONFIG (not from FALLBACKS)
-    const secret = CONFIG.SPOTIFY_SECRET || "376136387538459893883312310911992847112448894410210511297108";
+    const secret = CONFIG.SPOTIFY_SECRET;
+    
+    if (!secret || secret.length === 0) {
+      return { success: false, error: 'Spotify secret not configured', results: [] };
+    }
     
     const now = Date.now();
     const counter = Math.floor(now / 30000);
@@ -49,10 +52,19 @@ export async function spotifySearch(query, limit = 5) {
       }
     });
     
-    const tokenData = await tokenRes.json();
+    if (!tokenRes.ok) {
+      return { success: false, error: `Spotify token failed: ${tokenRes.status}`, results: [] };
+    }
+    
+    let tokenData;
+    try {
+      tokenData = await tokenRes.json();
+    } catch (e) {
+      return { success: false, error: 'Invalid JSON from Spotify token endpoint', results: [] };
+    }
     
     if (!tokenData.accessToken) {
-      return { success: false, error: 'Spotify token failed', results: [] };
+      return { success: false, error: 'Spotify access token missing', results: [] };
     }
     
     // Search tracks
@@ -74,7 +86,17 @@ export async function spotifySearch(query, limit = 5) {
       }
     });
     
-    const data = await searchRes.json();
+    if (!searchRes.ok) {
+      return { success: false, error: `Spotify search failed: ${searchRes.status}`, results: [] };
+    }
+    
+    let data;
+    try {
+      data = await searchRes.json();
+    } catch (e) {
+      return { success: false, error: 'Invalid JSON from Spotify search', results: [] };
+    }
+    
     const items = data?.data?.searchV2?.tracksV2?.items || [];
     
     const results = [];
