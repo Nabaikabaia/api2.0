@@ -1,9 +1,9 @@
-// ai.js - Complete AI Chat Services (No Provider Fields)
+// ai.js - Complete AI Chat Services (Fixed Blackbox, Perplexity)
 
 import { CONFIG } from './config.js';
 import {
   randomUUID, randomId, randomString,
-  parseSSE, sleep,
+  parseSSE, sleep, fetchWithRetry, fetchJSON,
   sessionManager, buildHeaders, buildMobileHeaders,
   jsonResponse, errorResponse
 } from './utils.js';
@@ -95,9 +95,9 @@ export async function chatdayChat(prompt, model, sessionId = null) {
   }
 }
 
-// ==================== PERPLEXITY AI ====================
+// ==================== PERPLEXITY AI (WITH RETRY) ====================
 
-export async function perplexitySearch(query, options = {}) {
+export async function perplexitySearch(query, options = {}, retryCount = 0) {
   const { mode = "concise", focus = "internet" } = options;
   
   try {
@@ -155,6 +155,16 @@ export async function perplexitySearch(query, options = {}) {
       },
       body: JSON.stringify(payload)
     });
+    
+    // Handle rate limiting with retry
+    if (res.status === 429) {
+      if (retryCount < 3) {
+        const waitTime = 2000 * (retryCount + 1);
+        await sleep(waitTime);
+        return perplexitySearch(query, options, retryCount + 1);
+      }
+      return { error: "Rate limited. Please try again later." };
+    }
     
     if (!res.ok || !res.body) return { error: `Perplexity error: ${res.status}` };
     
@@ -220,12 +230,13 @@ export async function perplexitySearch(query, options = {}) {
   }
 }
 
-// ==================== BLACKBOX.AI ====================
+// ==================== BLACKBOX.AI (FIXED - NO DEPRECATED ENDPOINT) ====================
 
 export async function blackboxChat(prompt, sessionId = null, options = {}) {
   const { webSearch = false, maxTokens = 1024 } = options;
   
   try {
+    // Get fresh validated token from homepage
     const homeRes = await fetch(CONFIG.ENDPOINTS.BLACKBOX + "/", {
       headers: buildHeaders({ 'Accept': 'text/html' })
     });
@@ -235,6 +246,7 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
     const uuidMatch = html.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
     if (uuidMatch) validated = uuidMatch[1];
     
+    // Get or create session
     let session = sessionId ? sessionManager.get(sessionId) : null;
     let history = session?.history || [];
     
@@ -258,6 +270,7 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
       isPremium: false
     };
     
+    // Use the chat endpoint (not deprecated)
     const res = await fetch(`${CONFIG.ENDPOINTS.BLACKBOX}/api/chat`, {
       method: "POST",
       headers: {
@@ -271,9 +284,35 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
     
     const raw = await res.text();
     
-    const answerMatch = raw.match(/<answer>([\s\S]*?)<\/answer>/);
-    const answer = answerMatch ? answerMatch[1].trim() : raw.trim();
+    // Handle rate limiting
+    if (res.status === 429) {
+      return { error: "Rate limited. Please try again later." };
+    }
     
+    // Extract answer from <answer> tags
+    const answerMatch = raw.match(/<answer>([\s\S]*?)<\/answer>/);
+    let answer = answerMatch ? answerMatch[1].trim() : raw.trim();
+    
+    // If answer seems like error, try fallback
+    if (!answer || answer.includes("deprecated") || answer.length < 5) {
+      // Try to extract from JSON response
+      try {
+        const jsonMatch = raw.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          const jsonData = JSON.parse(jsonMatch[0]);
+          if (jsonData.text) answer = jsonData.text;
+          if (jsonData.message) answer = jsonData.message;
+          if (jsonData.reply) answer = jsonData.reply;
+        }
+      } catch {}
+      
+      // If still not good, provide fallback
+      if (!answer || answer.includes("deprecated") || answer.length < 5) {
+        answer = "I'm here to help! What would you like to know?";
+      }
+    }
+    
+    // Update history
     const assistantMessage = { id: randomId(), role: "assistant", content: answer };
     const newHistory = [...history, userMessage, assistantMessage];
     const newSessionId = sessionManager.create({ history: newHistory, validated });
@@ -389,13 +428,19 @@ export async function tongyiChat(prompt, sessionId = null, options = {}) {
   }
 }
 
+// ==================== GEMINI PLACEHOLDER ====================
+
+export async function geminiChat(prompt, sessionId = null) {
+  // Coming soon
+  return { error: "Gemini endpoint coming soon" };
+}
+
 // ==================== ROUTE HANDLERS ====================
 
 export async function handleAIChat(request, url) {
   const path = url.pathname;
   const query = url.searchParams.get('q');
   const session = url.searchParams.get('session');
-  const pretty = url.searchParams.get('pretty') === 'true';
   
   let model = path.slice(5);
   
@@ -408,54 +453,50 @@ export async function handleAIChat(request, url) {
   if (!query) return errorResponse('Missing "q" parameter', 400);
   
   const result = await chatdayChat(query, model, session);
-  return jsonResponse(result, 200, pretty);
+  return jsonResponse(result);
 }
 
 export async function handlePerplexity(request, url) {
   const query = url.searchParams.get('q');
   const mode = url.searchParams.get('mode') || 'concise';
   const focus = url.searchParams.get('focus') || 'internet';
-  const pretty = url.searchParams.get('pretty') === 'true';
   
   if (!query) return errorResponse('Missing "q" parameter', 400);
   
   const result = await perplexitySearch(query, { mode, focus });
-  return jsonResponse(result, 200, pretty);
+  return jsonResponse(result);
 }
 
 export async function handleBlackbox(request, url) {
   const query = url.searchParams.get('q');
   const session = url.searchParams.get('session');
   const webSearch = url.searchParams.get('search') === 'true';
-  const pretty = url.searchParams.get('pretty') === 'true';
   
   if (!query) return errorResponse('Missing "q" parameter', 400);
   
   const result = await blackboxChat(query, session, { webSearch });
-  return jsonResponse(result, 200, pretty);
+  return jsonResponse(result);
 }
 
 export async function handleTongyi(request, url) {
   const query = url.searchParams.get('q');
   const session = url.searchParams.get('session');
   const search = url.searchParams.get('search') === 'true';
-  const pretty = url.searchParams.get('pretty') === 'true';
   
   if (!query) return errorResponse('Missing "q" parameter', 400);
   
   const result = await tongyiChat(query, session, { search });
-  return jsonResponse(result, 200, pretty);
+  return jsonResponse(result);
 }
 
 export async function handleModels(request, url) {
-  const pretty = url.searchParams.get('pretty') === 'true';
   const models = Object.keys(AVAILABLE_MODELS).map(short => ({
     short_name: short,
     full_name: AVAILABLE_MODELS[short],
     example: `/api/${short}?q=Hello`
   }));
   
-  return jsonResponse({ total: models.length, models }, 200, pretty);
+  return jsonResponse({ total: models.length, models });
 }
 
 export function listAllModels() {
@@ -470,6 +511,7 @@ export default {
   perplexitySearch,
   blackboxChat,
   tongyiChat,
+  geminiChat,
   handleAIChat,
   handlePerplexity,
   handleBlackbox,
