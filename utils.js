@@ -1,469 +1,224 @@
-// utils.js - Complete Utilities with Auto Pretty Print & Custom Response Wrapper
+// routes.js - Updated with only working AI endpoints visible
 
 import { CONFIG } from './config.js';
+import { jsonResponse, errorResponse } from './utils.js';
 
-// ==================== CRYPTO & ID GENERATORS ====================
+// Import all service handlers (keep all, just hide from docs)
+import {
+  handleAIChat,
+  handlePerplexity,
+  handleBlackbox,
+  handleTongyi,
+  handleModels
+} from './ai.js';
 
-export const randomId = (len = 7) => {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let s = "";
-  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
-  return s;
-};
+import {
+  handleSpotify,
+  handleAppleMusic,
+  handleSoundCloud,
+  handleRemusic,
+  handleSoundCloudDL
+} from './music.js';
 
-export const randomUUID = () => crypto.randomUUID();
+import {
+  handleSaveFrom,
+  handleInstagram,
+  handleTikTokDownload,
+  handleTikTokSearch,
+  handleTikTokTrending,
+  handleVidboxSearch,
+  handleVidboxTrending
+} from './video.js';
 
-export const randomIP = () => Array.from({ length: 4 }, () => 1 + Math.floor(Math.random() * 254)).join(".");
+import {
+  handleDeepAI,
+  handleIloveimg,
+  handlePinterestSearch,
+  handlePinterestPin
+} from './image.js';
 
-export const md5 = (s) => crypto.createHash("md5").update(s).digest("hex");
+import {
+  handleTranscribe,
+  handleTerabox,
+  handleSecurityScan,
+  handleRobloxStalk
+} from './tools.js';
 
-export const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex");
+// ==================== GET BASE URL DYNAMICALLY ====================
 
-export const sha1 = (s) => crypto.createHash("sha1").update(s).digest("hex");
-
-export const base64Encode = (obj) => {
-  const str = JSON.stringify(obj);
-  return btoa(String.fromCharCode(...new TextEncoder().encode(str)));
-};
-
-export const base64Decode = (str) => {
-  try {
-    const binary = atob(str);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-    return JSON.parse(new TextDecoder().decode(bytes));
-  } catch {
-    return null;
-  }
-};
-
-export const generateRandomHex = (bytes) => {
-  const arr = new Uint8Array(bytes);
-  crypto.getRandomValues(arr);
-  return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
-};
-
-// ==================== AES & RSA ENCRYPTION (Cloudflare Compatible) ====================
-
-export async function aesEncrypt(plain, secret) {
-  const encoder = new TextEncoder();
-  const keyData = encoder.encode(secret);
-  const cryptoKey = await crypto.subtle.importKey(
-    'raw', keyData, { name: 'AES-CBC', length: 128 }, false, ['encrypt']
-  );
-  const iv = encoder.encode(secret.slice(0, 16));
-  const encrypted = await crypto.subtle.encrypt({ name: 'AES-CBC', iv }, cryptoKey, encoder.encode(plain));
-  return btoa(String.fromCharCode(...new Uint8Array(encrypted)));
+function getBaseUrl(request) {
+  const url = new URL(request.url);
+  return `${url.protocol}//${url.host}`;
 }
 
-export async function rsaEncrypt(plain, publicKeyPem) {
-  const pemHeader = "-----BEGIN PUBLIC KEY-----";
-  const pemFooter = "-----END PUBLIC KEY-----";
-  const pemContents = publicKeyPem.replace(pemHeader, '').replace(pemFooter, '').replace(/\s/g, '');
-  const binaryKey = Uint8Array.from(atob(pemContents), c => c.charCodeAt(0));
-  const cryptoKey = await crypto.subtle.importKey('spki', binaryKey, { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
-  const encrypted = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, cryptoKey, new TextEncoder().encode(plain));
-  return btoa(String.fromCharCode(...new Uint8Array(encrypted)));
-}
+// ==================== DOCS PAGE (ONLY WORKING AI ENDPOINTS) ====================
 
-// ==================== SSE (Server-Sent Events) PARSER ====================
-
-export async function parseSSE(response, options = {}) {
-  const { onDelta, onComplete } = options;
+function getDocsPage(request) {
+  const baseUrl = getBaseUrl(request);
   
-  if (!response.ok || !response.body) return "";
+  // Only working AI models (chatday.ai models)
+  const workingModels = [
+    'gpt55', 'gpt54', 'gpt53chat', 'gpt51instant', 'gpt5', 'gpt4o', 'gpt4omini',
+    'claude-opus', 'claude-opus-47', 'claude-opus-46', 'claude-opus-45',
+    'claude-sonnet', 'claude-haiku', 'claude-fable',
+    'deepseek-pro', 'deepseek-flash', 'deepseek-thinking',
+    'gemini-pro', 'gemini-3-pro', 'gemini-flash',
+    'grok', 'llama', 'qwen', 'kimi'
+  ];
   
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let fullReply = "";
+  const workingExamples = workingModels.map(model => ({
+    endpoint: `${baseUrl}/api/${model}?q=Hello world`,
+    description: `${model.toUpperCase()} - AI Chat`
+  }));
   
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-    
-    for (const line of lines) {
-      if (line.startsWith("data: ")) {
-        const jsonStr = line.substring(6);
-        if (jsonStr === "[DONE]") continue;
-        
-        try {
-          const data = JSON.parse(jsonStr);
-          
-          let delta = null;
-          if (data.delta) delta = data.delta;
-          if (data.choices?.[0]?.delta?.content) delta = data.choices[0].delta.content;
-          if (data.content) delta = data.content;
-          
-          if (delta) {
-            fullReply += delta;
-            if (onDelta) onDelta(delta);
-          }
-        } catch (e) {}
-      }
-    }
-  }
-  
-  if (onComplete) onComplete(fullReply);
-  return fullReply.trim();
-}
-
-// ==================== FETCH WITH RETRY ====================
-
-export async function fetchWithRetry(url, options = {}, maxRetries = 3) {
-  let lastError = null;
-  
-  for (let i = 0; i < maxRetries; i++) {
-    try {
-      const response = await fetch(url, options);
-      if (response.ok) return response;
-      
-      if (response.status >= 400 && response.status < 500 && response.status !== 429) {
-        return response;
-      }
-      
-      lastError = `HTTP ${response.status}`;
-      await sleep(1000 * (i + 1));
-    } catch (error) {
-      lastError = error.message;
-      if (i < maxRetries - 1) await sleep(1000 * (i + 1));
-    }
-  }
-  
-  throw new Error(`Failed after ${maxRetries} retries: ${lastError}`);
-}
-
-export async function fetchJSON(url, options = {}, maxRetries = 3) {
-  const response = await fetchWithRetry(url, options, maxRetries);
-  if (!response.ok) return null;
-  return response.json().catch(() => null);
-}
-
-// ==================== SLEEP / DELAY ====================
-
-export const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-// ==================== SESSION MANAGER ====================
-
-class SessionManager {
-  constructor() {
-    this.store = new Map();
-  }
-  
-  get(id) {
-    const session = this.store.get(id);
-    if (!session) return null;
-    
-    if (session.expiresAt && Date.now() > session.expiresAt) {
-      this.store.delete(id);
-      return null;
-    }
-    
-    return session;
-  }
-  
-  set(id, data, ttlMs = CONFIG.LIMITS?.SESSION_TTL_MS || 3600000) {
-    this.store.set(id, {
-      ...data,
-      expiresAt: Date.now() + ttlMs,
-      updatedAt: Date.now()
-    });
-    return id;
-  }
-  
-  create(data, ttlMs = CONFIG.LIMITS?.SESSION_TTL_MS || 3600000) {
-    const id = randomUUID();
-    this.store.set(id, {
-      ...data,
-      expiresAt: Date.now() + ttlMs,
-      createdAt: Date.now()
-    });
-    return id;
-  }
-  
-  delete(id) {
-    this.store.delete(id);
-  }
-  
-  clear() {
-    this.store.clear();
-  }
-  
-  cleanup() {
-    const now = Date.now();
-    for (const [id, session] of this.store) {
-      if (session.expiresAt && now > session.expiresAt) {
-        this.store.delete(id);
-      }
-    }
-  }
-}
-
-export const sessionManager = new SessionManager();
-
-// ==================== RESPONSE FORMATTERS (AUTO PRETTY PRINT) ====================
-
-export function jsonResponse(data, status = 200) {
-  // Wrap response with NABEES branding
-  const wrappedResponse = {
-    status_code: status,
+  return {
+    service: "Nabees Apis 2.0",
+    title: "NABEES AI Gateway API Documentation",
+    description: "Complete API Gateway for AI Chat (20+ models)",
+    base_url: baseUrl,
     creator: "NABEES",
     provider: "NABEES TECH NAIJA DEVOPS",
     country: "Nigeria",
     whatsapp_channel: "https://whatsapp.com/channel/0029VawtjOXJpe8X3j3NCZ3j",
-    timestamp: Date.now(),
-    data: data
+    endpoints: {
+      ai_chat: {
+        description: "Chat with 20+ AI models",
+        total_models: workingModels.length,
+        usage: "GET /api/{model}?q=your+question",
+        models: workingModels,
+        examples: workingExamples.slice(0, 10) // Show first 10 examples
+      },
+      utility: {
+        description: "Utility endpoints",
+        endpoints: [
+          { method: "GET", path: `${baseUrl}/api/models`, example: `${baseUrl}/api/models`, description: "List all available AI models" },
+          { method: "GET", path: `${baseUrl}/docs`, example: `${baseUrl}/docs`, description: "This documentation page" }
+        ]
+      }
+    },
+    note: "All responses are automatically formatted with pretty JSON (2-space indentation)"
   };
+}
+
+// ==================== HOME PAGE (ONLY WORKING AI ENDPOINTS) ====================
+
+function getHomePage(request) {
+  const baseUrl = getBaseUrl(request);
   
-  // ALWAYS pretty print with 2-space indentation
-  const jsonString = JSON.stringify(wrappedResponse, null, 2);
+  const workingModels = [
+    'gpt55', 'gpt54', 'gpt4o', 'claude-opus', 'claude-sonnet', 'claude-haiku',
+    'deepseek-pro', 'deepseek-flash', 'gemini-pro', 'grok', 'llama', 'qwen', 'kimi'
+  ];
   
-  return new Response(jsonString, {
-    status,
+  return {
+    service: "Nabees Apis 2.0",
+    version: "2.0",
+    status: "operational",
+    creator: "NABEES",
+    provider: "NABEES TECH NAIJA DEVOPS",
+    country: "Nigeria",
+    whatsapp_channel: "https://whatsapp.com/channel/0029VawtjOXJpe8X3j3NCZ3j",
+    ai_models: {
+      total: workingModels.length,
+      list: workingModels,
+      usage: "GET /api/{model}?q=your+question",
+      example: `${baseUrl}/api/gpt55?q=Hello world`
+    },
+    documentation: `${baseUrl}/docs`
+  };
+}
+
+// ==================== ROUTE DEFINITIONS ====================
+
+const routes = {
+  // AI Chat Routes (Working)
+  'GET /api/models': handleModels,
+  'GET /api/chat': handleAIChat,
+  'GET /api/tongyi': handleTongyi,
+  
+  // Hidden but functional endpoints (not in docs)
+  'GET /api/spotify': handleSpotify,
+  'GET /api/applemusic': handleAppleMusic,
+  'GET /api/soundcloud': handleSoundCloud,
+  'GET /api/remusic': handleRemusic,
+  'GET /api/soundcloud/dl': handleSoundCloudDL,
+  'GET /api/download': handleSaveFrom,
+  'GET /api/instagram': handleInstagram,
+  'GET /api/tiktok': handleTikTokDownload,
+  'GET /api/tiktok/search': handleTikTokSearch,
+  'GET /api/tiktok/trending': handleTikTokTrending,
+  'GET /api/movies': handleVidboxSearch,
+  'GET /api/movies/trending': handleVidboxTrending,
+  'GET /api/image/edit': handleDeepAI,
+  'GET /api/image/upscale': handleIloveimg,
+  'GET /api/pinterest/search': handlePinterestSearch,
+  'GET /api/pinterest/pin': handlePinterestPin,
+  'GET /api/transcribe': handleTranscribe,
+  'GET /api/terabox': handleTerabox,
+  'GET /api/security/scan': handleSecurityScan,
+  'GET /api/roblox': handleRobloxStalk
+};
+
+// ==================== DYNAMIC ROUTE HANDLER ====================
+
+export async function handleRequest(request, url, path) {
+  const method = request.method;
+  const routeKey = `${method} ${path}`;
+  
+  // Docs page (clean, only working AI)
+  if (path === '/docs' || path === '/api/docs') {
+    const docs = getDocsPage(request);
+    return jsonResponse(docs);
+  }
+  
+  // Home page (clean, only working AI)
+  if (path === '/' || path === '') {
+    const home = getHomePage(request);
+    return jsonResponse(home);
+  }
+  
+  // Check exact route matches (all hidden endpoints still work)
+  if (routes[routeKey]) {
+    return routes[routeKey](request, url);
+  }
+  
+  // Dynamic AI model routes (working)
+  if (method === 'GET' && path.startsWith('/api/')) {
+    const modelName = path.slice(5);
+    const reservedRoutes = [
+      'models', 'chat', 'tongyi',
+      'spotify', 'applemusic', 'soundcloud', 'remusic', 'soundcloud/dl',
+      'download', 'instagram', 'tiktok', 'tiktok/search', 'tiktok/trending',
+      'movies', 'movies/trending',
+      'image/edit', 'image/upscale', 'pinterest/search', 'pinterest/pin',
+      'transcribe', 'terabox', 'security/scan', 'roblox', 'docs', 'perplexity', 'blackbox'
+    ];
+    
+    if (!reservedRoutes.includes(modelName) && CONFIG.CHAT_MODELS[modelName]) {
+      return handleAIChat(request, url);
+    }
+  }
+  
+  return errorResponse(`Endpoint not found: ${method} ${path}\n\nVisit /docs for API documentation`, 404);
+}
+
+// ==================== CORS HANDLER ====================
+
+export function handleOptions(request) {
+  return new Response(null, {
+    status: 204,
     headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type, Cookie, Authorization'
+      'Access-Control-Allow-Headers': 'Content-Type, Cookie, Authorization',
+      'Access-Control-Max-Age': '86400'
     }
   });
 }
 
-export function errorResponse(message, status = 500) {
-  return jsonResponse({ 
-    success: false, 
-    error: message 
-  }, status);
-}
-
-export function successResponse(data, message = "success") {
-  return jsonResponse({ 
-    success: true, 
-    message, 
-    data 
-  }, 200);
-}
-
-// ==================== URL VALIDATORS ====================
-
-export function isValidUrl(string) {
-  try {
-    new URL(string);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function extractDomain(url) {
-  try {
-    const hostname = new URL(url).hostname;
-    return hostname.replace(/^www\./, '');
-  } catch {
-    return null;
-  }
-}
-
-// ==================== FORMATTERS ====================
-
-export function formatDuration(seconds) {
-  const mins = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
-
-export function formatFileSize(bytes) {
-  if (bytes === 0) return '0 B';
-  const k = 1024;
-  const sizes = ['B', 'KB', 'MB', 'GB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-// ==================== HEADER BUILDERS ====================
-
-export function buildHeaders(customHeaders = {}, cookies = null) {
-  const headers = {
-    'User-Agent': CONFIG.UA_DESKTOP,
-    'Accept': '*/*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    ...customHeaders
-  };
-  
-  if (cookies) {
-    headers['Cookie'] = cookies;
-  }
-  
-  return headers;
-}
-
-export function buildMobileHeaders(customHeaders = {}, cookies = null) {
-  const headers = {
-    'User-Agent': CONFIG.UA_MOBILE,
-    'Accept': '*/*',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Sec-Ch-Ua-Mobile': '?1',
-    ...customHeaders
-  };
-  
-  if (cookies) {
-    headers['Cookie'] = cookies;
-  }
-  
-  return headers;
-}
-
-// ==================== POLLING UTILITY ====================
-
-export async function poll(fn, options = {}) {
-  const {
-    maxAttempts = CONFIG.LIMITS?.MAX_POLL_ATTEMPTS || 30,
-    interval = CONFIG.LIMITS?.POLL_INTERVAL_MS || 5000,
-    onProgress = null
-  } = options;
-  
-  for (let i = 0; i < maxAttempts; i++) {
-    const result = await fn(i);
-    
-    if (onProgress) onProgress(i, result);
-    
-    if (result && (result.success === true || result.status === 'success' || result.done === true)) {
-      return result;
-    }
-    
-    if (result && (result.error || result.status === 'failed')) {
-      throw new Error(result.error || 'Polling failed');
-    }
-    
-    if (i < maxAttempts - 1) await sleep(interval);
-  }
-  
-  throw new Error('Polling timeout after ' + maxAttempts + ' attempts');
-}
-
-// ==================== IMAGE DIMENSIONS ====================
-
-export function getImageDimensions(buffer) {
-  // JPEG
-  if (buffer[0] === 0xff && buffer[1] === 0xd8) {
-    let offset = 2;
-    while (offset < buffer.length) {
-      if (buffer[offset] !== 0xff) {
-        offset++;
-        continue;
-      }
-      const marker = buffer[offset + 1];
-      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-        return {
-          height: (buffer[offset + 5] << 8) | buffer[offset + 6],
-          width: (buffer[offset + 7] << 8) | buffer[offset + 8]
-        };
-      }
-      offset += 2 + ((buffer[offset + 2] << 8) | buffer[offset + 3]);
-    }
-  }
-  
-  // PNG
-  if (buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
-    return {
-      width: (buffer[16] << 24) | (buffer[17] << 16) | (buffer[18] << 8) | buffer[19],
-      height: (buffer[20] << 24) | (buffer[21] << 16) | (buffer[22] << 8) | buffer[23]
-    };
-  }
-  
-  return { width: 0, height: 0 };
-}
-
-// ==================== RANDOM STRING GENERATORS ====================
-
-export function randomString(length = 16) {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-  let result = "";
-  for (let i = 0; i < length; i++) {
-    result += chars[Math.floor(Math.random() * chars.length)];
-  }
-  return result;
-}
-
-export function randomNumber(min = 100000, max = 999999) {
-  return Math.floor(Math.random() * (max - min + 1)) + min;
-}
-
-// ==================== COOKIE MANAGER ====================
-
-export function parseSetCookie(setCookie) {
-  if (!setCookie) return null;
-  
-  const cookies = {};
-  const parts = setCookie.split(';');
-  
-  for (const part of parts) {
-    const [key, value] = part.trim().split('=');
-    if (key && value) cookies[key] = value;
-  }
-  
-  return cookies;
-}
-
-export function mergeCookies(existingCookies, newCookie) {
-  const cookieMap = new Map();
-  
-  if (existingCookies) {
-    existingCookies.split('; ').forEach(cookie => {
-      const [name, value] = cookie.split('=');
-      if (name) cookieMap.set(name, value);
-    });
-  }
-  
-  if (newCookie) {
-    const [name, value] = newCookie.split('=');
-    if (name) cookieMap.set(name, value);
-  }
-  
-  return Array.from(cookieMap.entries())
-    .map(([name, value]) => `${name}=${value}`)
-    .join('; ');
-}
-
-// ==================== EXPORT ALL ====================
+// ==================== EXPORT ====================
 
 export default {
-  randomId,
-  randomUUID,
-  randomIP,
-  md5,
-  sha256,
-  sha1,
-  base64Encode,
-  base64Decode,
-  generateRandomHex,
-  aesEncrypt,
-  rsaEncrypt,
-  parseSSE,
-  fetchWithRetry,
-  fetchJSON,
-  sleep,
-  sessionManager,
-  jsonResponse,
-  errorResponse,
-  successResponse,
-  isValidUrl,
-  extractDomain,
-  formatDuration,
-  formatFileSize,
-  buildHeaders,
-  buildMobileHeaders,
-  poll,
-  getImageDimensions,
-  randomString,
-  randomNumber,
-  parseSetCookie,
-  mergeCookies
+  handleRequest,
+  handleOptions
 };
