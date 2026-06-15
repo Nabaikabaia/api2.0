@@ -1,4 +1,4 @@
-// routes.js - All endpoints working, but docs/home only show AI
+// routes.js - Complete Routes with ALL 24 AI Models
 
 import { CONFIG } from './config.js';
 import { jsonResponse, errorResponse } from './utils.js';
@@ -51,13 +51,54 @@ function getBaseUrl(request) {
   return `${url.protocol}//${url.host}`;
 }
 
-// ==================== DOCS PAGE (ONLY AI MODELS) ====================
+// ==================== ALL 24 AI MODELS WITH DESCRIPTIONS & TEST EXAMPLES ====================
+
+const AI_MODELS = [
+  // OpenAI (7 models)
+  { name: "gpt55", description: "OpenAI GPT-5.5 - Most advanced", test: "Hello, how are you?" },
+  { name: "gpt54", description: "OpenAI GPT-5.4", test: "Explain quantum physics" },
+  { name: "gpt53chat", description: "OpenAI GPT-5.3 Chat", test: "Tell me a joke" },
+  { name: "gpt51instant", description: "OpenAI GPT-5.1 Instant - Fast", test: "Quick summary of AI" },
+  { name: "gpt5", description: "OpenAI GPT-5", test: "Write a haiku about coding" },
+  { name: "gpt4o", description: "OpenAI GPT-4o - Omni", test: "Explain AI in simple terms" },
+  { name: "gpt4omini", description: "OpenAI GPT-4o Mini - Lightweight", test: "What is machine learning?" },
+  
+  // Anthropic Claude (7 models)
+  { name: "claude-opus", description: "Anthropic Claude Opus 4.8 - Most capable", test: "Write a short story" },
+  { name: "claude-opus-47", description: "Anthropic Claude Opus 4.7", test: "Explain philosophy" },
+  { name: "claude-opus-46", description: "Anthropic Claude Opus 4.6", test: "Analyze this poem" },
+  { name: "claude-opus-45", description: "Anthropic Claude Opus 4.5", test: "Help me with math" },
+  { name: "claude-sonnet", description: "Anthropic Claude Sonnet 4.6 - Balanced", test: "Help me debug this code" },
+  { name: "claude-haiku", description: "Anthropic Claude Haiku 4.5 - Fastest", test: "Quick response needed" },
+  { name: "claude-fable", description: "Anthropic Claude Fable 5", test: "Tell me a fable" },
+  
+  // DeepSeek (3 models)
+  { name: "deepseek-pro", description: "DeepSeek V4 Pro - Most powerful", test: "Solve: 2x + 5 = 15" },
+  { name: "deepseek-flash", description: "DeepSeek V4 Flash - Fast", test: "What is the capital of France?" },
+  { name: "deepseek-thinking", description: "DeepSeek V3.2 Thinking - Reasoning", test: "Explain step by step how to bake a cake" },
+  
+  // Google Gemini (3 models)
+  { name: "gemini-pro", description: "Google Gemini 3.1 Pro", test: "Write a poem about nature" },
+  { name: "gemini-3-pro", description: "Google Gemini 3 Pro", test: "Explain quantum computing" },
+  { name: "gemini-flash", description: "Google Gemini 3.1 Flash Lite - Fast", test: "What's the weather like?" },
+  
+  // xAI Grok (1 model)
+  { name: "grok", description: "xAI Grok 4.1 Fast", test: "What's trending in AI?" },
+  
+  // Meta Llama (1 model)
+  { name: "llama", description: "Meta Llama 4 Maverick", test: "Chat with me casually" },
+  
+  // Alibaba Qwen (1 model)
+  { name: "qwen", description: "Alibaba Qwen 3 Max", test: "你好，介绍一下自己" },
+  
+  // Moonshot Kimi (1 model)
+  { name: "kimi", description: "Moonshot Kimi K2.6", test: "Explain long context understanding" }
+];
+
+// ==================== DOCS PAGE ====================
 
 function getDocsPage(request) {
   const baseUrl = getBaseUrl(request);
-  
-  // Only AI models from chatday (working ones)
-  const aiModels = Object.keys(CONFIG.CHAT_MODELS);
   
   return {
     service: "Nabees Apis 2.0",
@@ -69,20 +110,31 @@ function getDocsPage(request) {
     whatsapp_channel: "https://whatsapp.com/channel/0029VawtjOXJpe8X3j3NCZ3j",
     endpoints: {
       ai_chat: {
-        description: "Chat with 20+ AI models",
+        description: "Chat with 24 AI models",
         usage: "GET /api/{model}?q=your+question",
-        models: aiModels,
-        example: `${baseUrl}/api/gpt55?q=Hello world`
+        total_models: AI_MODELS.length,
+        models: AI_MODELS.map(model => ({
+          name: model.name,
+          description: model.description,
+          test_example: `${baseUrl}/api/${model.name}?q=${encodeURIComponent(model.test)}`
+        }))
+      },
+      utility: {
+        description: "Utility endpoints",
+        endpoints: [
+          { method: "GET", path: "/api/models", description: "List all available AI models" },
+          { method: "GET", path: "/docs", description: "This documentation page" }
+        ]
       }
-    }
+    },
+    note: "All responses are automatically formatted with pretty JSON (2-space indentation)"
   };
 }
 
-// ==================== HOME PAGE (ONLY AI) ====================
+// ==================== HOME PAGE ====================
 
 function getHomePage(request) {
   const baseUrl = getBaseUrl(request);
-  const aiModels = Object.keys(CONFIG.CHAT_MODELS);
   
   return {
     service: "Nabees Apis 2.0",
@@ -93,23 +145,28 @@ function getHomePage(request) {
     country: "Nigeria",
     whatsapp_channel: "https://whatsapp.com/channel/0029VawtjOXJpe8X3j3NCZ3j",
     ai_models: {
-      total: aiModels.length,
-      list: aiModels,
+      description: "Chat with 24 AI models",
       usage: "GET /api/{model}?q=your+question",
-      example: `${baseUrl}/api/gpt55?q=Hello world`
+      total_models: AI_MODELS.length,
+      models: AI_MODELS.map(model => ({
+        name: model.name,
+        description: model.description,
+        test: `${baseUrl}/api/${model.name}?q=${encodeURIComponent(model.test)}`
+      })),
+      quick_start: `${baseUrl}/api/gpt55?q=Hello%20world`
     },
     documentation: `${baseUrl}/docs`
   };
 }
 
-// ==================== ROUTES (ALL WORKING, INCLUDING HIDDEN) ====================
+// ==================== ROUTES ====================
 
 const routes = {
-  // AI Chat Routes (all work)
+  // AI Chat Routes
   'GET /api/models': handleModels,
   'GET /api/chat': handleAIChat,
-  'GET /api/perplexity': handlePerplexity,      // Still works, just hidden from docs
-  'GET /api/blackbox': handleBlackbox,          // Still works, just hidden from docs
+  'GET /api/perplexity': handlePerplexity,
+  'GET /api/blackbox': handleBlackbox,
   'GET /api/tongyi': handleTongyi,
   
   // Music Routes
@@ -141,28 +198,28 @@ const routes = {
   'GET /api/roblox': handleRobloxStalk
 };
 
-// ==================== DYNAMIC ROUTE HANDLER ====================
+// ==================== HANDLER ====================
 
 export async function handleRequest(request, url, path) {
   const method = request.method;
   const routeKey = `${method} ${path}`;
   
-  // Docs page (only shows AI models)
+  // Docs page
   if (path === '/docs' || path === '/api/docs') {
     return jsonResponse(getDocsPage(request));
   }
   
-  // Home page (only shows AI)
+  // Home page
   if (path === '/' || path === '') {
     return jsonResponse(getHomePage(request));
   }
   
-  // Check exact route matches (ALL work)
+  // Check exact routes
   if (routes[routeKey]) {
     return routes[routeKey](request, url);
   }
   
-  // Dynamic AI model routes (chatday.ai models)
+  // Dynamic AI model routes
   if (method === 'GET' && path.startsWith('/api/')) {
     const modelName = path.slice(5);
     const reservedRoutes = [
@@ -179,10 +236,10 @@ export async function handleRequest(request, url, path) {
     }
   }
   
-  return errorResponse(`Endpoint not found: ${method} ${path}\n\nVisit /docs for available AI models`, 404);
+  return errorResponse(`Not found: ${method} ${path}\nVisit /docs for available endpoints`, 404);
 }
 
-// ==================== CORS HANDLER ====================
+// ==================== CORS ====================
 
 export function handleOptions() {
   return new Response(null, {
