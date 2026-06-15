@@ -1,4 +1,4 @@
-// utils.js - Complete Utilities with Auto Pretty Print & Custom Response Wrapper
+// utils.js - Complete Utilities with Clean Response Format
 
 import { CONFIG } from './config.js';
 
@@ -43,7 +43,7 @@ export const generateRandomHex = (bytes) => {
   return Array.from(arr).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
-// ==================== AES & RSA ENCRYPTION (Cloudflare Compatible) ====================
+// ==================== AES & RSA ENCRYPTION ====================
 
 export async function aesEncrypt(plain, secret) {
   const encoder = new TextEncoder();
@@ -205,20 +205,16 @@ class SessionManager {
 
 export const sessionManager = new SessionManager();
 
-// ==================== RESPONSE FORMATTERS (AUTO PRETTY PRINT) ====================
+// ==================== RESPONSE FORMATTERS (CLEAN) ====================
 
 export function jsonResponse(data, status = 200) {
-  const wrappedResponse = {
-    status_code: status,
+  const response = {
+    status: status,
     creator: "NABEES",
-    provider: "NABEES TECH NAIJA DEVOPS",
-    country: "Nigeria",
-    whatsapp_channel: "https://whatsapp.com/channel/0029VawtjOXJpe8X3j3NCZ3j",
-    timestamp: Date.now(),
-    data: data
+    result: data
   };
   
-  const jsonString = JSON.stringify(wrappedResponse, null, 2);
+  const jsonString = JSON.stringify(response, null, 2);
   
   return new Response(jsonString, {
     status,
@@ -233,10 +229,7 @@ export function jsonResponse(data, status = 200) {
 }
 
 export function errorResponse(message, status = 500) {
-  return jsonResponse({ 
-    success: false, 
-    error: message 
-  }, status);
+  return jsonResponse({ error: message }, status);
 }
 
 export function successResponse(data, message = "success") {
