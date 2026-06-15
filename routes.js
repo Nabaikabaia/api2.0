@@ -120,7 +120,6 @@ function getDocsPage(request) {
         ]
       }
     },
-    note: "All responses are automatically formatted with pretty JSON (2-space indentation)"
   };
 }
 
