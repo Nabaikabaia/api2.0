@@ -1,9 +1,9 @@
-// ai.js - Complete AI Chat Services (Fixed Blackbox, Perplexity)
+// ai.js - Complete AI Chat Services (Clean Response Format)
 
 import { CONFIG } from './config.js';
 import {
   randomUUID, randomId, randomString,
-  parseSSE, sleep, fetchWithRetry, fetchJSON,
+  parseSSE, sleep,
   sessionManager, buildHeaders, buildMobileHeaders,
   jsonResponse, errorResponse
 } from './utils.js';
@@ -85,9 +85,9 @@ export async function chatdayChat(prompt, model, sessionId = null) {
     });
     
     return {
-      reply: fullReply.trim() || "No response from AI",
-      session: newSession,
-      model: model
+      model: fullModel,
+      result: fullReply.trim() || "No response from AI",
+      session: newSession
     };
     
   } catch (error) {
@@ -95,7 +95,7 @@ export async function chatdayChat(prompt, model, sessionId = null) {
   }
 }
 
-// ==================== PERPLEXITY AI (WITH RETRY) ====================
+// ==================== PERPLEXITY AI ====================
 
 export async function perplexitySearch(query, options = {}, retryCount = 0) {
   const { mode = "concise", focus = "internet" } = options;
@@ -156,11 +156,9 @@ export async function perplexitySearch(query, options = {}, retryCount = 0) {
       body: JSON.stringify(payload)
     });
     
-    // Handle rate limiting with retry
     if (res.status === 429) {
       if (retryCount < 3) {
-        const waitTime = 2000 * (retryCount + 1);
-        await sleep(waitTime);
+        await sleep(2000 * (retryCount + 1));
         return perplexitySearch(query, options, retryCount + 1);
       }
       return { error: "Rate limited. Please try again later." };
@@ -230,13 +228,12 @@ export async function perplexitySearch(query, options = {}, retryCount = 0) {
   }
 }
 
-// ==================== BLACKBOX.AI (FIXED - NO DEPRECATED ENDPOINT) ====================
+// ==================== BLACKBOX.AI ====================
 
 export async function blackboxChat(prompt, sessionId = null, options = {}) {
   const { webSearch = false, maxTokens = 1024 } = options;
   
   try {
-    // Get fresh validated token from homepage
     const homeRes = await fetch(CONFIG.ENDPOINTS.BLACKBOX + "/", {
       headers: buildHeaders({ 'Accept': 'text/html' })
     });
@@ -246,7 +243,6 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
     const uuidMatch = html.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
     if (uuidMatch) validated = uuidMatch[1];
     
-    // Get or create session
     let session = sessionId ? sessionManager.get(sessionId) : null;
     let history = session?.history || [];
     
@@ -270,7 +266,6 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
       isPremium: false
     };
     
-    // Use the chat endpoint (not deprecated)
     const res = await fetch(`${CONFIG.ENDPOINTS.BLACKBOX}/api/chat`, {
       method: "POST",
       headers: {
@@ -284,18 +279,14 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
     
     const raw = await res.text();
     
-    // Handle rate limiting
     if (res.status === 429) {
       return { error: "Rate limited. Please try again later." };
     }
     
-    // Extract answer from <answer> tags
     const answerMatch = raw.match(/<answer>([\s\S]*?)<\/answer>/);
     let answer = answerMatch ? answerMatch[1].trim() : raw.trim();
     
-    // If answer seems like error, try fallback
     if (!answer || answer.includes("deprecated") || answer.length < 5) {
-      // Try to extract from JSON response
       try {
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
@@ -306,13 +297,11 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
         }
       } catch {}
       
-      // If still not good, provide fallback
       if (!answer || answer.includes("deprecated") || answer.length < 5) {
         answer = "I'm here to help! What would you like to know?";
       }
     }
     
-    // Update history
     const assistantMessage = { id: randomId(), role: "assistant", content: answer };
     const newHistory = [...history, userMessage, assistantMessage];
     const newSessionId = sessionManager.create({ history: newHistory, validated });
@@ -431,7 +420,6 @@ export async function tongyiChat(prompt, sessionId = null, options = {}) {
 // ==================== GEMINI PLACEHOLDER ====================
 
 export async function geminiChat(prompt, sessionId = null) {
-  // Coming soon
   return { error: "Gemini endpoint coming soon" };
 }
 
@@ -491,7 +479,7 @@ export async function handleTongyi(request, url) {
 
 export async function handleModels(request, url) {
   const models = Object.keys(AVAILABLE_MODELS).map(short => ({
-    short_name: short,
+    name: short,
     full_name: AVAILABLE_MODELS[short],
     example: `/api/${short}?q=Hello`
   }));
