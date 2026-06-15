@@ -101,13 +101,6 @@ function getDocsPage(request) {
   const baseUrl = getBaseUrl(request);
   
   return {
-    service: "Nabees Apis 2.0",
-    title: "NABEES AI Gateway API Documentation",
-    base_url: baseUrl,
-    creator: "NABEES",
-    provider: "NABEES TECH NAIJA DEVOPS",
-    country: "Nigeria",
-    whatsapp_channel: "https://whatsapp.com/channel/0029VawtjOXJpe8X3j3NCZ3j",
     endpoints: {
       ai_chat: {
         description: "Chat with 24 AI models",
@@ -139,11 +132,6 @@ function getHomePage(request) {
   return {
     service: "Nabees Apis 2.0",
     version: "2.0",
-    status: "operational",
-    creator: "NABEES",
-    provider: "NABEES TECH NAIJA DEVOPS",
-    country: "Nigeria",
-    whatsapp_channel: "https://whatsapp.com/channel/0029VawtjOXJpe8X3j3NCZ3j",
     ai_models: {
       description: "Chat with 24 AI models",
       usage: "GET /api/{model}?q=your+question",
