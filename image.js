@@ -1,5 +1,4 @@
-// image.js - Complete Image Services
-// Services: DeepAI Image Editor, Iloveimg Upscaler, Pinterest Search
+// image.js - Complete Image Services with EzRemove
 
 import { CONFIG } from './config.js';
 import {
@@ -10,7 +9,6 @@ import {
 } from './utils.js';
 
 // ==================== DEEPAI IMAGE EDITOR ====================
-// Edit images with text prompts (cinematic, make it darker, etc.)
 
 export async function deepaiEdit(imageUrl, prompt, options = {}) {
   const { maxRetries = 6 } = options;
@@ -62,7 +60,6 @@ export async function deepaiEdit(imageUrl, prompt, options = {}) {
         const data = await res.json();
         
         if (data?.output_url) {
-          // Download the edited image
           const editedRes = await fetch(data.output_url);
           const editedBuffer = await editedRes.arrayBuffer();
           const base64 = btoa(String.fromCharCode(...new Uint8Array(editedBuffer)));
@@ -73,8 +70,7 @@ export async function deepaiEdit(imageUrl, prompt, options = {}) {
             edited_url: data.output_url,
             edited_base64: `data:${contentType};base64,${base64}`,
             id: data.id,
-            prompt: prompt,
-            provider: 'deepai'
+            prompt: prompt
           };
         }
         
@@ -86,10 +82,9 @@ export async function deepaiEdit(imageUrl, prompt, options = {}) {
       }
     }
     
-    return { error: lastError || 'DeepAI edit failed', provider: 'deepai' };
-    
+    return { error: lastError || 'DeepAI edit failed' };
   } catch (error) {
-    return { error: error.message, provider: 'deepai' };
+    return { error: error.message };
   }
 }
 
@@ -98,13 +93,11 @@ function reverse(s) {
 }
 
 // ==================== ILOVEIMG IMAGE UPSCALER ====================
-// Upscale images by 2x, 4x, etc.
 
 export async function iloveimgUpscale(imageUrl, scale = 4, options = {}) {
   const { maxRetries = 3 } = options;
   
   try {
-    // Fetch image
     const imgRes = await fetch(imageUrl, {
       headers: { 'User-Agent': CONFIG.UA_DESKTOP }
     });
@@ -181,8 +174,6 @@ export async function iloveimgUpscale(imageUrl, scale = 4, options = {}) {
     
     const upscaledBuffer = await upscaleRes.arrayBuffer();
     const base64 = btoa(String.fromCharCode(...new Uint8Array(upscaledBuffer)));
-    
-    // Get dimensions
     const dimensions = getImageDimensions(new Uint8Array(upscaledBuffer));
     
     return {
@@ -192,17 +183,14 @@ export async function iloveimgUpscale(imageUrl, scale = 4, options = {}) {
       scale: scale,
       width: dimensions.width,
       height: dimensions.height,
-      size: upscaledBuffer.byteLength,
-      provider: 'iloveimg'
+      size: upscaledBuffer.byteLength
     };
-    
   } catch (error) {
-    return { error: error.message, provider: 'iloveimg' };
+    return { error: error.message };
   }
 }
 
 function getImageDimensions(buffer) {
-  // JPEG
   if (buffer[0] === 0xff && buffer[1] === 0xd8) {
     let offset = 2;
     while (offset < buffer.length) {
@@ -220,7 +208,6 @@ function getImageDimensions(buffer) {
       offset += 2 + ((buffer[offset + 2] << 8) | buffer[offset + 3]);
     }
   }
-  // PNG
   if (buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) {
     return {
       width: (buffer[16] << 24) | (buffer[17] << 16) | (buffer[18] << 8) | buffer[19],
@@ -231,24 +218,20 @@ function getImageDimensions(buffer) {
 }
 
 // ==================== PINTEREST SEARCH ====================
-// Search for images and videos on Pinterest
 
 export async function pinterestSearch(query, options = {}) {
   const { limit = 10, scope = 'pins' } = options;
   
   try {
-    // Get session cookies
     const homeRes = await fetch(CONFIG.ENDPOINTS.PINTEREST, {
       headers: buildHeaders({ 'Accept': 'text/html' })
     });
     const html = await homeRes.text();
     const cookies = homeRes.headers.getSetCookie?.()?.map(c => c.split(';')[0]).join('; ') || '';
     
-    // Extract CSRF token
     const csrfMatch = html.match(/csrftoken=([^;]+)/);
     const csrfToken = csrfMatch ? csrfMatch[1] : '';
     
-    // Build search request
     const sourceUrl = `/search/${scope}/?q=${encodeURIComponent(query)}`;
     const data = {
       options: {
@@ -303,12 +286,10 @@ export async function pinterestSearch(query, options = {}) {
       success: true,
       query: query,
       count: results.length,
-      results: results,
-      provider: 'pinterest'
+      results: results
     };
-    
   } catch (error) {
-    return { error: error.message, results: [], provider: 'pinterest' };
+    return { error: error.message, results: [] };
   }
 }
 
@@ -360,12 +341,98 @@ export async function pinterestPinDetail(pinId) {
       created_at: pin.created_at,
       repin_count: pin.repin_count,
       like_count: pin.like_count,
-      comment_count: pin.comment_count,
-      provider: 'pinterest'
+      comment_count: pin.comment_count
     };
-    
   } catch (error) {
-    return { error: error.message, provider: 'pinterest' };
+    return { error: error.message };
+  }
+}
+
+// ==================== EZREMOVE - WATERMARK/BACKGROUND REMOVER ====================
+
+export async function ezremove(imageUrl) {
+  try {
+    // Fetch image from URL
+    const imgRes = await fetch(imageUrl, {
+      headers: { 'User-Agent': CONFIG.UA_MOBILE }
+    });
+    
+    if (!imgRes.ok) {
+      return { success: false, error: `Failed to fetch image: ${imgRes.status}` };
+    }
+    
+    const imageBuffer = await imgRes.arrayBuffer();
+    const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
+    const ext = contentType.split('/')[1] || 'jpg';
+    const filename = `image.${ext}`;
+    
+    // Build multipart form
+    const boundary = `----FormBoundary${Math.random().toString(36).slice(2)}`;
+    const bodyParts = [];
+    
+    bodyParts.push(
+      `--${boundary}\r\nContent-Disposition: form-data; name="image_file"; filename="${filename}"\r\nContent-Type: ${contentType}\r\n\r\n`
+    );
+    bodyParts.push(imageBuffer);
+    bodyParts.push(`\r\n--${boundary}--\r\n`);
+    
+    const body = new Blob(bodyParts, { type: 'application/octet-stream' });
+    
+    // Create job
+    const createRes = await fetch('https://api.ezremove.ai/api/ez-remove/watermark-remove/create-job', {
+      method: 'POST',
+      headers: {
+        'User-Agent': CONFIG.UA_MOBILE,
+        'Accept': 'application/json, text/plain, */*',
+        'Origin': 'https://ezremove.ai',
+        'Referer': 'https://ezremove.ai/',
+        'product-serial': `sr-${Date.now()}`,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`
+      },
+      body: body
+    });
+    
+    const createData = await createRes.json();
+    const jobId = createData?.result?.job_id;
+    
+    if (!jobId) {
+      return { success: false, error: 'Failed to create job' };
+    }
+    
+    // Poll for completion (up to 30 attempts)
+    for (let i = 0; i < 30; i++) {
+      await sleep(2000);
+      
+      const checkRes = await fetch(`https://api.ezremove.ai/api/ez-remove/watermark-remove/get-job/${jobId}`, {
+        headers: {
+          'User-Agent': CONFIG.UA_MOBILE,
+          'Accept': 'application/json, text/plain, */*',
+          'Origin': 'https://ezremove.ai',
+          'Referer': 'https://ezremove.ai/',
+          'product-serial': `sr-${Date.now()}`
+        }
+      });
+      
+      const checkData = await checkRes.json();
+      const resultUrl = checkData?.result?.output?.[0];
+      
+      if (checkData?.code === 100000 && resultUrl) {
+        return {
+          success: true,
+          original_url: imageUrl,
+          result_url: resultUrl,
+          job_id: jobId
+        };
+      }
+      
+      if (checkData?.code !== 300001) {
+        return { success: false, error: 'Job failed' };
+      }
+    }
+    
+    return { success: false, error: 'Timeout - job taking too long' };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 }
 
@@ -375,12 +442,8 @@ export async function handleDeepAI(req, url) {
   const imageUrl = url.searchParams.get('url');
   const prompt = url.searchParams.get('prompt');
   
-  if (!imageUrl) {
-    return errorResponse('Missing ?url= parameter (image URL)', 400);
-  }
-  if (!prompt) {
-    return errorResponse('Missing ?prompt= parameter (edit description)', 400);
-  }
+  if (!imageUrl) return errorResponse('Missing ?url= (image URL)', 400);
+  if (!prompt) return errorResponse('Missing ?prompt= (edit description)', 400);
   
   const result = await deepaiEdit(imageUrl, prompt);
   return jsonResponse(result);
@@ -390,12 +453,8 @@ export async function handleIloveimg(req, url) {
   const imageUrl = url.searchParams.get('url');
   const scale = parseInt(url.searchParams.get('scale') || '4');
   
-  if (!imageUrl) {
-    return errorResponse('Missing ?url= parameter (image URL)', 400);
-  }
-  if (scale < 2 || scale > 8) {
-    return errorResponse('Scale must be between 2 and 8', 400);
-  }
+  if (!imageUrl) return errorResponse('Missing ?url= (image URL)', 400);
+  if (scale < 2 || scale > 8) return errorResponse('Scale must be between 2 and 8', 400);
   
   const result = await iloveimgUpscale(imageUrl, scale);
   return jsonResponse(result);
@@ -403,10 +462,7 @@ export async function handleIloveimg(req, url) {
 
 export async function handlePinterestSearch(req, url) {
   const query = url.searchParams.get('q');
-  
-  if (!query) {
-    return errorResponse('Missing ?q= parameter', 400);
-  }
+  if (!query) return errorResponse('Missing ?q=', 400);
   
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '10'), 50);
   const result = await pinterestSearch(query, { limit });
@@ -415,24 +471,32 @@ export async function handlePinterestSearch(req, url) {
 
 export async function handlePinterestPin(req, url) {
   const pinId = url.searchParams.get('id');
-  
-  if (!pinId) {
-    return errorResponse('Missing ?id= parameter (pin ID)', 400);
-  }
+  if (!pinId) return errorResponse('Missing ?id= (pin ID)', 400);
   
   const result = await pinterestPinDetail(pinId);
   return jsonResponse(result);
 }
 
-// ==================== EXPORT ALL ====================
+export async function handleEzRemove(req, url) {
+  const imageUrl = url.searchParams.get('url');
+  
+  if (!imageUrl) return errorResponse('Missing ?url= (image URL)', 400);
+  
+  const result = await ezremove(imageUrl);
+  return jsonResponse(result);
+}
+
+// ==================== EXPORT ====================
 
 export default {
   deepaiEdit,
   iloveimgUpscale,
   pinterestSearch,
   pinterestPinDetail,
+  ezremove,
   handleDeepAI,
   handleIloveimg,
   handlePinterestSearch,
-  handlePinterestPin
+  handlePinterestPin,
+  handleEzRemove
 };
