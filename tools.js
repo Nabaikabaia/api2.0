@@ -1,5 +1,5 @@
-// tools.js - Complete Tools Services
-// Services: Audio Transcription, Terabox Downloader, ShieldNet Security Scanner, Roblox OSINT
+// tools.js - Complete Tools Services (Full Power)
+// Services: Audio Transcription, Terabox, ShieldNet, Roblox, Translate, FaceAge
 
 import { CONFIG } from './config.js';
 import {
@@ -10,15 +10,14 @@ import {
 } from './utils.js';
 
 // ==================== AUDIO TRANSCRIPTION (audiotranscriber.io) ====================
-// Transcribe audio files with speaker diarization
 
 export async function transcribeAudio(audioUrl, options = {}) {
   const { maxRetries = 6 } = options;
   
   try {
-    // Generate fingerprint
     const fp = randomString(16);
     const aesSecret = randomString(16);
+    
     const aesEncrypt = (plain, secret) => {
       const cipher = crypto.createCipheriv("aes-128-cbc", Buffer.from(secret, "utf8"), Buffer.from(secret, "utf8"));
       return Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]).toString("base64");
@@ -51,7 +50,6 @@ r/myG9S+9cR5huTuFQIDAQAB
       'X-code': String(Date.now())
     };
     
-    // Fetch audio file
     const audioRes = await fetch(audioUrl, {
       headers: { 'User-Agent': CONFIG.UA_DESKTOP }
     });
@@ -66,7 +64,6 @@ r/myG9S+9cR5huTuFQIDAQAB
     const fileHash = md5(new Uint8Array(audioBuffer));
     const fileName = `${fileHash}.${ext}`;
     
-    // Request upload URL
     const signRes = await fetch(`${CONFIG.ENDPOINTS.TRANSCRIBE_API}/api/app/files/upload_file`, {
       method: "POST",
       headers: {
@@ -90,7 +87,6 @@ r/myG9S+9cR5huTuFQIDAQAB
       return { error: 'Failed to get upload URL' };
     }
     
-    // Upload to OSS
     const uploadRes = await fetch(signData.url, {
       method: "PUT",
       headers: {
@@ -110,7 +106,6 @@ r/myG9S+9cR5huTuFQIDAQAB
     
     const cdnUrl = "https://temp.audiotranscriber.io/" + signData.url.split("?")[0].split("aliyuncs.com/")[1];
     
-    // Request transcription
     const transcribeRes = await fetch(`${CONFIG.ENDPOINTS.TRANSCRIBE_API}/api/app/tr/files`, {
       method: "POST",
       headers: {
@@ -151,21 +146,17 @@ r/myG9S+9cR5huTuFQIDAQAB
       success: true,
       text: fullText,
       duration: totalDuration,
-      segments: segments,
-      provider: 'audiotranscriber'
+      segments: segments
     };
-    
   } catch (error) {
-    return { error: error.message, provider: 'audiotranscriber' };
+    return { error: error.message };
   }
 }
 
 // ==================== TERABOX DOWNLOADER ====================
-// Download files from Terabox (1024teradownloader.com)
 
 export async function teraboxDownload(url) {
   try {
-    // Get landing page for cookies
     const landingRes = await fetch(CONFIG.ENDPOINTS.TERABOX + "/", {
       headers: buildMobileHeaders({ 'Accept': 'text/html' })
     });
@@ -176,7 +167,6 @@ export async function teraboxDownload(url) {
       return { error: 'Failed to get session cookies' };
     }
     
-    // Submit URL
     const formData = new FormData();
     formData.append('url', url);
     
@@ -214,17 +204,14 @@ export async function teraboxDownload(url) {
       source_url: url,
       total_files: data.total_files || 0,
       total_folders: data.total_folders || 0,
-      files: files,
-      provider: 'terabox'
+      files: files
     };
-    
   } catch (error) {
-    return { error: error.message, provider: 'terabox' };
+    return { error: error.message };
   }
 }
 
 // ==================== SHIELDNET SECURITY SCANNER ====================
-// Scan website security (HTTPS, headers, DNS, TLS, etc.)
 
 export async function shieldnetScan(domain, options = {}) {
   const { maxRetries = 3 } = options;
@@ -232,7 +219,6 @@ export async function shieldnetScan(domain, options = {}) {
   try {
     const sessionId = `session_${Date.now()}_${randomString(6)}`;
     
-    // Send conversion event
     const conversionRes = await fetch(`${CONFIG.ENDPOINTS.SHIELDNET_API}/conversion-events`, {
       method: "POST",
       headers: {
@@ -253,7 +239,6 @@ export async function shieldnetScan(domain, options = {}) {
       })
     });
     
-    // Enqueue scan
     const enqueueRes = await fetch(`${CONFIG.ENDPOINTS.SHIELDNET_API}/scan-counter`, {
       method: "POST",
       headers: {
@@ -267,10 +252,8 @@ export async function shieldnetScan(domain, options = {}) {
       })
     });
     
-    // Wait a bit for scan to process
     await sleep(3000);
     
-    // Get scan results (with retries)
     let scanData = null;
     for (let i = 0; i < maxRetries; i++) {
       const scanRes = await fetch(`${CONFIG.ENDPOINTS.SHIELDNET_API}/free-scan?domain=${encodeURIComponent(domain)}`, {
@@ -307,21 +290,17 @@ export async function shieldnetScan(domain, options = {}) {
       cdn_detection: scanData.cdnDetection,
       recommendations: scanData.recommendations,
       scan_duration_ms: scanData.scanDurationMs,
-      cached: scanData.cached,
-      provider: 'shieldnet'
+      cached: scanData.cached
     };
-    
   } catch (error) {
-    return { error: error.message, provider: 'shieldnet' };
+    return { error: error.message };
   }
 }
 
 // ==================== ROBLOX OSINT ====================
-// Get detailed Roblox user information
 
 export async function robloxStalk(usernameOrId) {
   try {
-    // Resolve username to ID
     let userId = null;
     
     if (/^\d+$/.test(usernameOrId)) {
@@ -340,7 +319,6 @@ export async function robloxStalk(usernameOrId) {
       return { error: 'User not found' };
     }
     
-    // Fetch all data in parallel
     const [user, userInfo, friendsCount, followersCount, followingsCount, groups, presence] = await Promise.all([
       fetchJSON(`${CONFIG.ENDPOINTS.ROBLOX_USERS}/users/${userId}`),
       fetchJSON(`https://users.roblox.com/v1/users/${userId}`),
@@ -394,12 +372,194 @@ export async function robloxStalk(usernameOrId) {
         role: g.role.name,
         role_rank: g.role.rank
       })),
-      profile_url: `https://www.roblox.com/users/${userId}/profile`,
-      provider: 'roblox'
+      profile_url: `https://www.roblox.com/users/${userId}/profile`
     };
-    
   } catch (error) {
-    return { error: error.message, provider: 'roblox' };
+    return { error: error.message };
+  }
+}
+
+// ==================== GOOGLE TRANSLATE + TTS ====================
+
+const LANGUAGES = {
+  'auto': 'Auto Detect',
+  'id': 'Indonesian',
+  'en': 'English',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'zh': 'Chinese (Simplified)',
+  'ar': 'Arabic',
+  'es': 'Spanish',
+  'fr': 'French',
+  'de': 'German',
+  'it': 'Italian',
+  'pt': 'Portuguese',
+  'ru': 'Russian',
+  'hi': 'Hindi',
+  'th': 'Thai',
+  'vi': 'Vietnamese'
+};
+
+export async function googleTranslate(text, from = 'auto', to = 'en', mode = 'text-to-text') {
+  try {
+    // Translate
+    const translateUrl = 'https://translate.googleapis.com/translate_a/single';
+    const params = new URLSearchParams({
+      client: 'gtx',
+      sl: from,
+      tl: to,
+      dt: 't',
+      dt: 'bd',
+      dt: 'rm',
+      dt: 'ss',
+      dt: 'md',
+      dt: 'ld',
+      dt: 'ex',
+      q: text
+    });
+    
+    const res = await fetch(`${translateUrl}?${params.toString()}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    
+    if (!res.ok) {
+      return { success: false, error: `Translation failed: ${res.status}` };
+    }
+    
+    const data = await res.json();
+    
+    let translatedText = '';
+    let detectedLang = from;
+    
+    if (Array.isArray(data)) {
+      if (Array.isArray(data[0])) {
+        translatedText = data[0].map(item => item[0]).join('');
+      }
+      if (data[2]) {
+        detectedLang = data[2];
+      }
+    }
+    
+    // If mode is text-to-audio, generate TTS
+    if (mode === 'text-to-audio') {
+      const audioBase64 = await googleTTS(translatedText || text, to);
+      
+      return {
+        success: true,
+        mode: 'text-to-audio',
+        input: text,
+        detected_from: detectedLang,
+        to: to,
+        translated_text: translatedText || text,
+        audio_base64: audioBase64,
+        format: 'mp3'
+      };
+    }
+    
+    // Text-to-text mode
+    return {
+      success: true,
+      mode: 'text-to-text',
+      input: text,
+      detected_from: detectedLang,
+      to: to,
+      translated_text: translatedText || text
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
+  }
+}
+
+export async function googleTTS(text, lang = 'en') {
+  try {
+    const url = `https://translate.google.com/translate_tts`;
+    const params = new URLSearchParams({
+      ie: 'UTF-8',
+      q: text,
+      tl: lang,
+      client: 'gtx',
+      ttsspeed: '1.0'
+    });
+    
+    const res = await fetch(`${url}?${params.toString()}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Referer': 'https://translate.google.com/'
+      }
+    });
+    
+    if (!res.ok) {
+      throw new Error(`TTS failed: ${res.status}`);
+    }
+    
+    const audioBuffer = await res.arrayBuffer();
+    return btoa(String.fromCharCode(...new Uint8Array(audioBuffer)));
+  } catch (error) {
+    throw new Error(`TTS error: ${error.message}`);
+  }
+}
+
+// ==================== FACEAGE AI (AGE ESTIMATION) ====================
+
+export async function faceAgeDetect(imageUrl) {
+  try {
+    // Get CSRF token and cookies
+    const homeRes = await fetch('https://faceage.ai/', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
+      }
+    });
+    
+    const html = await homeRes.text();
+    const cookies = homeRes.headers.getSetCookie?.()?.map(c => c.split(';')[0]).join('; ') || '';
+    
+    let csrf = html.match(/name="csrf_token"\s+value="([^"]+)"/i)?.[1] ||
+               html.match(/csrf_token["']?\s*:\s*["']([^"']+)/i)?.[1] ||
+               html.match(/<meta\s+name="csrf-token"\s+content="([^"]+)"/i)?.[1];
+    
+    if (!csrf) {
+      return { success: false, error: 'CSRF token not found' };
+    }
+    
+    // Download image from URL
+    const imgRes = await fetch(imageUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+    
+    if (!imgRes.ok) {
+      return { success: false, error: `Failed to fetch image: ${imgRes.status}` };
+    }
+    
+    const imageBuffer = await imgRes.arrayBuffer();
+    
+    // Upload to FaceAge
+    const formData = new FormData();
+    formData.append('file', new Blob([imageBuffer], { type: 'image/jpeg' }), 'image.jpg');
+    formData.append('csrf_token', csrf);
+    
+    const uploadRes = await fetch('https://faceage.ai/upload', {
+      method: 'POST',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Cookie': cookies,
+        'Origin': 'https://faceage.ai',
+        'Referer': 'https://faceage.ai/'
+      },
+      body: formData
+    });
+    
+    const result = await uploadRes.json();
+    
+    return {
+      success: true,
+      result: result
+    };
+  } catch (error) {
+    return { success: false, error: error.message };
   }
 }
 
@@ -407,10 +567,7 @@ export async function robloxStalk(usernameOrId) {
 
 export async function handleTranscribe(req, url) {
   const audioUrl = url.searchParams.get('url');
-  
-  if (!audioUrl) {
-    return errorResponse('Missing ?url= parameter (audio file URL)', 400);
-  }
+  if (!audioUrl) return errorResponse('Missing ?url= (audio file URL)', 400);
   
   const result = await transcribeAudio(audioUrl);
   return jsonResponse(result);
@@ -418,10 +575,7 @@ export async function handleTranscribe(req, url) {
 
 export async function handleTerabox(req, url) {
   const teraboxUrl = url.searchParams.get('url');
-  
-  if (!teraboxUrl) {
-    return errorResponse('Missing ?url= parameter (Terabox URL)', 400);
-  }
+  if (!teraboxUrl) return errorResponse('Missing ?url= (Terabox URL)', 400);
   
   const result = await teraboxDownload(teraboxUrl);
   return jsonResponse(result);
@@ -429,10 +583,7 @@ export async function handleTerabox(req, url) {
 
 export async function handleSecurityScan(req, url) {
   const domain = url.searchParams.get('domain');
-  
-  if (!domain) {
-    return errorResponse('Missing ?domain= parameter', 400);
-  }
+  if (!domain) return errorResponse('Missing ?domain=', 400);
   
   const result = await shieldnetScan(domain);
   return jsonResponse(result);
@@ -440,24 +591,46 @@ export async function handleSecurityScan(req, url) {
 
 export async function handleRobloxStalk(req, url) {
   const user = url.searchParams.get('user');
-  
-  if (!user) {
-    return errorResponse('Missing ?user= parameter (username or ID)', 400);
-  }
+  if (!user) return errorResponse('Missing ?user=', 400);
   
   const result = await robloxStalk(user);
   return jsonResponse(result);
 }
 
-// ==================== EXPORT ALL ====================
+export async function handleTranslate(req, url) {
+  const text = url.searchParams.get('text');
+  const from = url.searchParams.get('from') || 'auto';
+  const to = url.searchParams.get('to') || 'en';
+  const mode = url.searchParams.get('mode') || 'text-to-text';
+  
+  if (!text) return errorResponse('Missing ?text=', 400);
+  
+  const result = await googleTranslate(text, from, to, mode);
+  return jsonResponse(result);
+}
+
+export async function handleFaceAge(req, url) {
+  const imageUrl = url.searchParams.get('url');
+  if (!imageUrl) return errorResponse('Missing ?url= (image URL)', 400);
+  
+  const result = await faceAgeDetect(imageUrl);
+  return jsonResponse(result);
+}
+
+// ==================== EXPORT ====================
 
 export default {
   transcribeAudio,
   teraboxDownload,
   shieldnetScan,
   robloxStalk,
+  googleTranslate,
+  googleTTS,
+  faceAgeDetect,
   handleTranscribe,
   handleTerabox,
   handleSecurityScan,
-  handleRobloxStalk
+  handleRobloxStalk,
+  handleTranslate,
+  handleFaceAge
 };
