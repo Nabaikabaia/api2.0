@@ -1,14 +1,18 @@
-// routes.js - Complete Routes with ALL 24 AI Models
+// routes.js - Complete Routes with ALL Services (Full Power)
 
 import { CONFIG } from './config.js';
 import { jsonResponse, errorResponse } from './utils.js';
 
-// Import ALL handlers (keep everything working)
+// Import ALL handlers
 import {
   handleAIChat,
   handlePerplexity,
   handleBlackbox,
   handleTongyi,
+  handleCopilot,
+  handleDuckAI,
+  handleQuillbot,
+  handleAsyntai,
   handleModels
 } from './ai.js';
 
@@ -27,7 +31,8 @@ import {
   handleTikTokSearch,
   handleTikTokTrending,
   handleVidboxSearch,
-  handleVidboxTrending
+  handleVidboxTrending,
+  handleEzRemove
 } from './video.js';
 
 import {
@@ -41,7 +46,9 @@ import {
   handleTranscribe,
   handleTerabox,
   handleSecurityScan,
-  handleRobloxStalk
+  handleRobloxStalk,
+  handleTranslate,
+  handleFaceAge
 } from './tools.js';
 
 // ==================== GET BASE URL ====================
@@ -51,7 +58,7 @@ function getBaseUrl(request) {
   return `${url.protocol}//${url.host}`;
 }
 
-// ==================== ALL 24 AI MODELS WITH DESCRIPTIONS & TEST EXAMPLES ====================
+// ==================== AI MODELS WITH DESCRIPTIONS & TEST EXAMPLES ====================
 
 const AI_MODELS = [
   // OpenAI (7 models)
@@ -101,6 +108,13 @@ function getDocsPage(request) {
   const baseUrl = getBaseUrl(request);
   
   return {
+    service: "Nabees Apis 2.0",
+    title: "NABEES AI Gateway API Documentation",
+    base_url: baseUrl,
+    creator: "NABEES",
+    provider: "NABEES TECH NAIJA DEVOPS",
+    country: "Nigeria",
+    whatsapp_channel: "https://whatsapp.com/channel/0029VawtjOXJpe8X3j3NCZ3j",
     endpoints: {
       ai_chat: {
         description: "Chat with 24 AI models",
@@ -112,6 +126,61 @@ function getDocsPage(request) {
           test_example: `${baseUrl}/api/${model.name}?q=${encodeURIComponent(model.test)}`
         }))
       },
+      ai_services: {
+        description: "Additional AI services",
+        endpoints: [
+          { method: "GET", path: "/api/perplexity", params: "?q=question&mode=concise", example: `${baseUrl}/api/perplexity?q=Who is president of Indonesia` },
+          { method: "GET", path: "/api/blackbox", params: "?q=code&search=true", example: `${baseUrl}/api/blackbox?q=How to reverse array in Python` },
+          { method: "GET", path: "/api/tongyi", params: "?q=question", example: `${baseUrl}/api/tongyi?q=Explain AI` },
+          { method: "GET", path: "/api/copilot", params: "?q=question&model=default", example: `${baseUrl}/api/copilot?q=Hello` },
+          { method: "GET", path: "/api/duckai", params: "?q=question", example: `${baseUrl}/api/duckai?q=What is AI` },
+          { method: "GET", path: "/api/quillbot", params: "?q=question", example: `${baseUrl}/api/quillbot?q=Write an essay` },
+          { method: "GET", path: "/api/asyntai", params: "?q=question", example: `${baseUrl}/api/asyntai?q=Hello` }
+        ]
+      },
+      music: {
+        description: "Search and stream music",
+        endpoints: [
+          { method: "GET", path: "/api/spotify", params: "?q=song+name&limit=5", example: `${baseUrl}/api/spotify?q=Blinding Lights` },
+          { method: "GET", path: "/api/applemusic", params: "?q=song+name&limit=5", example: `${baseUrl}/api/applemusic?q=Love Story` },
+          { method: "GET", path: "/api/soundcloud", params: "?q=track+name&limit=5", example: `${baseUrl}/api/soundcloud?q=raindance` },
+          { method: "GET", path: "/api/remusic", params: "?q=prompt&styles=Jazz,Chill", example: `${baseUrl}/api/remusic?q=calm piano&styles=Jazz` },
+          { method: "GET", path: "/api/soundcloud/dl", params: "?url=soundcloud_url", example: `${baseUrl}/api/soundcloud/dl?url=https://soundcloud.com/artist/track` }
+        ]
+      },
+      video: {
+        description: "Download videos and search movies",
+        endpoints: [
+          { method: "GET", path: "/api/download", params: "?url=video_url", example: `${baseUrl}/api/download?url=https://youtube.com/watch?v=xxx` },
+          { method: "GET", path: "/api/instagram", params: "?url=instagram_url", example: `${baseUrl}/api/instagram?url=https://instagram.com/p/xxx` },
+          { method: "GET", path: "/api/tiktok", params: "?url=tiktok_url", example: `${baseUrl}/api/tiktok?url=https://tiktok.com/@user/video/xxx` },
+          { method: "GET", path: "/api/tiktok/search", params: "?q=keyword&limit=10", example: `${baseUrl}/api/tiktok/search?q=aesthetic` },
+          { method: "GET", path: "/api/tiktok/trending", params: "?limit=20", example: `${baseUrl}/api/tiktok/trending` },
+          { method: "GET", path: "/api/movies", params: "?q=movie_name&limit=5", example: `${baseUrl}/api/movies?q=transformers` },
+          { method: "GET", path: "/api/movies/trending", params: "?type=movie&limit=10", example: `${baseUrl}/api/movies/trending` }
+        ]
+      },
+      image: {
+        description: "Edit, upscale, and search images",
+        endpoints: [
+          { method: "GET", path: "/api/image/edit", params: "?url=image_url&prompt=edit", example: `${baseUrl}/api/image/edit?url=image.jpg&prompt=cinematic` },
+          { method: "GET", path: "/api/image/upscale", params: "?url=image_url&scale=4", example: `${baseUrl}/api/image/upscale?url=image.jpg&scale=4` },
+          { method: "GET", path: "/api/pinterest/search", params: "?q=keyword", example: `${baseUrl}/api/pinterest/search?q=landscape` },
+          { method: "GET", path: "/api/pinterest/pin", params: "?id=pin_id", example: `${baseUrl}/api/pinterest/pin?id=123456789` },
+          { method: "GET", path: "/api/ezremove", params: "?url=image_url", example: `${baseUrl}/api/ezremove?url=image.jpg` }
+        ]
+      },
+      tools: {
+        description: "Audio transcription, translation, security, and more",
+        endpoints: [
+          { method: "GET", path: "/api/transcribe", params: "?url=audio_url", example: `${baseUrl}/api/transcribe?url=audio.mp3` },
+          { method: "GET", path: "/api/translate", params: "?text=hello&to=id", example: `${baseUrl}/api/translate?text=Hello&to=id` },
+          { method: "GET", path: "/api/faceage", params: "?url=image_url", example: `${baseUrl}/api/faceage?url=face.jpg` },
+          { method: "GET", path: "/api/terabox", params: "?url=terabox_url", example: `${baseUrl}/api/terabox?url=https://1024terabox.com/s/xxx` },
+          { method: "GET", path: "/api/security/scan", params: "?domain=website", example: `${baseUrl}/api/security/scan?domain=example.com` },
+          { method: "GET", path: "/api/roblox", params: "?user=username", example: `${baseUrl}/api/roblox?user=mrbeast` }
+        ]
+      },
       utility: {
         description: "Utility endpoints",
         endpoints: [
@@ -120,6 +189,7 @@ function getDocsPage(request) {
         ]
       }
     },
+    note: "All responses are automatically formatted with pretty JSON (2-space indentation)"
   };
 }
 
@@ -131,6 +201,11 @@ function getHomePage(request) {
   return {
     service: "Nabees Apis 2.0",
     version: "2.0",
+    status: "operational",
+    creator: "NABEES",
+    provider: "NABEES TECH NAIJA DEVOPS",
+    country: "Nigeria",
+    whatsapp_channel: "https://whatsapp.com/channel/0029VawtjOXJpe8X3j3NCZ3j",
     ai_models: {
       description: "Chat with 24 AI models",
       usage: "GET /api/{model}?q=your+question",
@@ -142,6 +217,19 @@ function getHomePage(request) {
       })),
       quick_start: `${baseUrl}/api/gpt55?q=Hello%20world`
     },
+    additional_services: {
+      description: "Additional services available",
+      endpoints: [
+        `${baseUrl}/api/perplexity`,
+        `${baseUrl}/api/copilot`,
+        `${baseUrl}/api/duckai`,
+        `${baseUrl}/api/quillbot`,
+        `${baseUrl}/api/asyntai`,
+        `${baseUrl}/api/spotify`,
+        `${baseUrl}/api/tiktok`,
+        `${baseUrl}/api/translate`
+      ]
+    },
     documentation: `${baseUrl}/docs`
   };
 }
@@ -149,12 +237,16 @@ function getHomePage(request) {
 // ==================== ROUTES ====================
 
 const routes = {
-  // AI Chat Routes
+  // AI Chat Routes (All working)
   'GET /api/models': handleModels,
   'GET /api/chat': handleAIChat,
   'GET /api/perplexity': handlePerplexity,
   'GET /api/blackbox': handleBlackbox,
   'GET /api/tongyi': handleTongyi,
+  'GET /api/copilot': handleCopilot,
+  'GET /api/duckai': handleDuckAI,
+  'GET /api/quillbot': handleQuillbot,
+  'GET /api/asyntai': handleAsyntai,
   
   // Music Routes
   'GET /api/spotify': handleSpotify,
@@ -171,6 +263,7 @@ const routes = {
   'GET /api/tiktok/trending': handleTikTokTrending,
   'GET /api/movies': handleVidboxSearch,
   'GET /api/movies/trending': handleVidboxTrending,
+  'GET /api/ezremove': handleEzRemove,
   
   // Image Routes
   'GET /api/image/edit': handleDeepAI,
@@ -182,7 +275,9 @@ const routes = {
   'GET /api/transcribe': handleTranscribe,
   'GET /api/terabox': handleTerabox,
   'GET /api/security/scan': handleSecurityScan,
-  'GET /api/roblox': handleRobloxStalk
+  'GET /api/roblox': handleRobloxStalk,
+  'GET /api/translate': handleTranslate,
+  'GET /api/faceage': handleFaceAge
 };
 
 // ==================== HANDLER ====================
@@ -206,16 +301,18 @@ export async function handleRequest(request, url, path) {
     return routes[routeKey](request, url);
   }
   
-  // Dynamic AI model routes
+  // Dynamic AI model routes (chatday.ai)
   if (method === 'GET' && path.startsWith('/api/')) {
     const modelName = path.slice(5);
     const reservedRoutes = [
       'models', 'chat', 'perplexity', 'blackbox', 'tongyi',
+      'copilot', 'duckai', 'quillbot', 'asyntai',
       'spotify', 'applemusic', 'soundcloud', 'remusic', 'soundcloud/dl',
       'download', 'instagram', 'tiktok', 'tiktok/search', 'tiktok/trending',
-      'movies', 'movies/trending',
+      'movies', 'movies/trending', 'ezremove',
       'image/edit', 'image/upscale', 'pinterest/search', 'pinterest/pin',
-      'transcribe', 'terabox', 'security/scan', 'roblox', 'docs'
+      'transcribe', 'terabox', 'security/scan', 'roblox', 'translate', 'faceage',
+      'docs'
     ];
     
     if (!reservedRoutes.includes(modelName) && CONFIG.CHAT_MODELS[modelName]) {
