@@ -21,7 +21,9 @@ import {
   handleAppleMusic,
   handleSoundCloud,
   handleRemusic,
-  handleSoundCloudDL
+  handleSoundCloudDL,
+  handleSpotifySearch,
+  handleSpotifyDownload
 } from './music.js';
 
 import {
@@ -31,15 +33,16 @@ import {
   handleTikTokSearch,
   handleTikTokTrending,
   handleVidboxSearch,
-  handleVidboxTrending,
-  handleEzRemove
+  handleVidboxTrending
 } from './video.js';
 
 import {
   handleDeepAI,
   handleIloveimg,
   handlePinterestSearch,
-  handlePinterestPin
+  handlePinterestPin,
+  handleEzRemove,
+  handlePhotoEnhancer
 } from './image.js';
 
 import {
@@ -48,7 +51,11 @@ import {
   handleSecurityScan,
   handleRobloxStalk,
   handleTranslate,
-  handleFaceAge
+  handleFaceAge,
+  handleMangaHome,
+  handleMangaSearch,
+  handleMangaDetail,
+  handleMangaChapter
 } from './tools.js';
 
 // ==================== GET BASE URL ====================
@@ -139,9 +146,11 @@ function getDocsPage(request) {
         ]
       },
       music: {
-        description: "Search and stream music",
+        description: "Search, download and stream music",
         endpoints: [
           { method: "GET", path: "/api/spotify", params: "?q=song+name&limit=5", example: `${baseUrl}/api/spotify?q=Blinding Lights` },
+          { method: "GET", path: "/api/spotify/search", params: "?q=song+name", example: `${baseUrl}/api/spotify/search?q=Nina Feast` },
+          { method: "GET", path: "/api/spotify/download", params: "?url=spotify_track_url", example: `${baseUrl}/api/spotify/download?url=https://open.spotify.com/track/xxx` },
           { method: "GET", path: "/api/applemusic", params: "?q=song+name&limit=5", example: `${baseUrl}/api/applemusic?q=Love Story` },
           { method: "GET", path: "/api/soundcloud", params: "?q=track+name&limit=5", example: `${baseUrl}/api/soundcloud?q=raindance` },
           { method: "GET", path: "/api/remusic", params: "?q=prompt&styles=Jazz,Chill", example: `${baseUrl}/api/remusic?q=calm piano&styles=Jazz` },
@@ -161,24 +170,29 @@ function getDocsPage(request) {
         ]
       },
       image: {
-        description: "Edit, upscale, and search images",
+        description: "Edit, upscale, enhance, and search images",
         endpoints: [
           { method: "GET", path: "/api/image/edit", params: "?url=image_url&prompt=edit", example: `${baseUrl}/api/image/edit?url=image.jpg&prompt=cinematic` },
           { method: "GET", path: "/api/image/upscale", params: "?url=image_url&scale=4", example: `${baseUrl}/api/image/upscale?url=image.jpg&scale=4` },
+          { method: "GET", path: "/api/image/enhance", params: "?url=image_url&method=1", example: `${baseUrl}/api/image/enhance?url=image.jpg&method=1` },
           { method: "GET", path: "/api/pinterest/search", params: "?q=keyword", example: `${baseUrl}/api/pinterest/search?q=landscape` },
           { method: "GET", path: "/api/pinterest/pin", params: "?id=pin_id", example: `${baseUrl}/api/pinterest/pin?id=123456789` },
           { method: "GET", path: "/api/ezremove", params: "?url=image_url", example: `${baseUrl}/api/ezremove?url=image.jpg` }
         ]
       },
       tools: {
-        description: "Audio transcription, translation, security, and more",
+        description: "Audio transcription, translation, security, manga and more",
         endpoints: [
           { method: "GET", path: "/api/transcribe", params: "?url=audio_url", example: `${baseUrl}/api/transcribe?url=audio.mp3` },
           { method: "GET", path: "/api/translate", params: "?text=hello&to=id", example: `${baseUrl}/api/translate?text=Hello&to=id` },
           { method: "GET", path: "/api/faceage", params: "?url=image_url", example: `${baseUrl}/api/faceage?url=face.jpg` },
           { method: "GET", path: "/api/terabox", params: "?url=terabox_url", example: `${baseUrl}/api/terabox?url=https://1024terabox.com/s/xxx` },
           { method: "GET", path: "/api/security/scan", params: "?domain=website", example: `${baseUrl}/api/security/scan?domain=example.com` },
-          { method: "GET", path: "/api/roblox", params: "?user=username", example: `${baseUrl}/api/roblox?user=mrbeast` }
+          { method: "GET", path: "/api/roblox", params: "?user=username", example: `${baseUrl}/api/roblox?user=mrbeast` },
+          { method: "GET", path: "/api/manga/home", params: "?page=1", example: `${baseUrl}/api/manga/home` },
+          { method: "GET", path: "/api/manga/search", params: "?q=naruto&page=1", example: `${baseUrl}/api/manga/search?q=naruto` },
+          { method: "GET", path: "/api/manga/detail", params: "?slug=naruto", example: `${baseUrl}/api/manga/detail?slug=naruto` },
+          { method: "GET", path: "/api/manga/chapter", params: "?url=chapter_url", example: `${baseUrl}/api/manga/chapter?url=https://mangadistrict.com/chapter/naruto-1` }
         ]
       },
       utility: {
@@ -226,8 +240,10 @@ function getHomePage(request) {
         `${baseUrl}/api/quillbot`,
         `${baseUrl}/api/asyntai`,
         `${baseUrl}/api/spotify`,
+        `${baseUrl}/api/spotify/download`,
         `${baseUrl}/api/tiktok`,
-        `${baseUrl}/api/translate`
+        `${baseUrl}/api/translate`,
+        `${baseUrl}/api/manga/home`
       ]
     },
     documentation: `${baseUrl}/docs`
@@ -237,7 +253,7 @@ function getHomePage(request) {
 // ==================== ROUTES ====================
 
 const routes = {
-  // AI Chat Routes (All working)
+  // AI Chat Routes
   'GET /api/models': handleModels,
   'GET /api/chat': handleAIChat,
   'GET /api/perplexity': handlePerplexity,
@@ -250,6 +266,8 @@ const routes = {
   
   // Music Routes
   'GET /api/spotify': handleSpotify,
+  'GET /api/spotify/search': handleSpotifySearch,
+  'GET /api/spotify/download': handleSpotifyDownload,
   'GET /api/applemusic': handleAppleMusic,
   'GET /api/soundcloud': handleSoundCloud,
   'GET /api/remusic': handleRemusic,
@@ -263,13 +281,14 @@ const routes = {
   'GET /api/tiktok/trending': handleTikTokTrending,
   'GET /api/movies': handleVidboxSearch,
   'GET /api/movies/trending': handleVidboxTrending,
-  'GET /api/ezremove': handleEzRemove,
   
   // Image Routes
   'GET /api/image/edit': handleDeepAI,
   'GET /api/image/upscale': handleIloveimg,
+  'GET /api/image/enhance': handlePhotoEnhancer,
   'GET /api/pinterest/search': handlePinterestSearch,
   'GET /api/pinterest/pin': handlePinterestPin,
+  'GET /api/ezremove': handleEzRemove,
   
   // Tools Routes
   'GET /api/transcribe': handleTranscribe,
@@ -277,7 +296,11 @@ const routes = {
   'GET /api/security/scan': handleSecurityScan,
   'GET /api/roblox': handleRobloxStalk,
   'GET /api/translate': handleTranslate,
-  'GET /api/faceage': handleFaceAge
+  'GET /api/faceage': handleFaceAge,
+  'GET /api/manga/home': handleMangaHome,
+  'GET /api/manga/search': handleMangaSearch,
+  'GET /api/manga/detail': handleMangaDetail,
+  'GET /api/manga/chapter': handleMangaChapter
 };
 
 // ==================== HANDLER ====================
@@ -307,11 +330,12 @@ export async function handleRequest(request, url, path) {
     const reservedRoutes = [
       'models', 'chat', 'perplexity', 'blackbox', 'tongyi',
       'copilot', 'duckai', 'quillbot', 'asyntai',
-      'spotify', 'applemusic', 'soundcloud', 'remusic', 'soundcloud/dl',
+      'spotify', 'spotify/search', 'spotify/download', 'applemusic', 'soundcloud', 'remusic', 'soundcloud/dl',
       'download', 'instagram', 'tiktok', 'tiktok/search', 'tiktok/trending',
-      'movies', 'movies/trending', 'ezremove',
-      'image/edit', 'image/upscale', 'pinterest/search', 'pinterest/pin',
+      'movies', 'movies/trending',
+      'image/edit', 'image/upscale', 'image/enhance', 'pinterest/search', 'pinterest/pin', 'ezremove',
       'transcribe', 'terabox', 'security/scan', 'roblox', 'translate', 'faceage',
+      'manga/home', 'manga/search', 'manga/detail', 'manga/chapter',
       'docs'
     ];
     
