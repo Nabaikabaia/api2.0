@@ -1,4 +1,5 @@
-// image.js - Complete Image Services with EzRemove
+// image.js - Complete Image Services (Full Power)
+// Services: DeepAI Image Editor, Iloveimg Upscaler, Pinterest Search, EzRemove, Photo Enhancer
 
 import { CONFIG } from './config.js';
 import {
@@ -436,6 +437,61 @@ export async function ezremove(imageUrl) {
   }
 }
 
+// ==================== PHOTO ENHANCER (ihancer.com) ====================
+
+export async function photoEnhancer(imageUrl, method = 1) {
+  try {
+    // Fetch image from URL
+    const imgRes = await fetch(imageUrl, {
+      headers: { 'User-Agent': CONFIG.UA_MOBILE }
+    });
+    
+    if (!imgRes.ok) {
+      return { error: `Failed to fetch image: ${imgRes.status}` };
+    }
+    
+    const imageBuffer = await imgRes.arrayBuffer();
+    const contentType = imgRes.headers.get('content-type') || 'image/jpeg';
+    const ext = contentType.split('/')[1] || 'jpg';
+    
+    // Build form data
+    const formData = new FormData();
+    formData.append('method', String(method));
+    formData.append('is_pro_version', 'true');
+    formData.append('is_enhancing_more', 'false');
+    formData.append('max_image_size', 'high');
+    formData.append('file', new Blob([imageBuffer], { type: contentType }), `file.${ext}`);
+    
+    // Send to ihancer
+    const res = await fetch('https://ihancer.com/api/enhance', {
+      method: 'POST',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Mobile Safari/537.36',
+        'Referer': 'https://ihancer.com/app/',
+        'Origin': 'https://ihancer.com'
+      },
+      body: formData
+    });
+    
+    if (!res.ok) {
+      return { error: `Enhance failed: ${res.status}` };
+    }
+    
+    const enhancedBuffer = await res.arrayBuffer();
+    const base64 = btoa(String.fromCharCode(...new Uint8Array(enhancedBuffer)));
+    
+    return {
+      success: true,
+      original_url: imageUrl,
+      enhanced_base64: `data:${contentType};base64,${base64}`,
+      method: method,
+      size: enhancedBuffer.byteLength
+    };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
 // ==================== ROUTE HANDLERS ====================
 
 export async function handleDeepAI(req, url) {
@@ -486,6 +542,16 @@ export async function handleEzRemove(req, url) {
   return jsonResponse(result);
 }
 
+export async function handlePhotoEnhancer(req, url) {
+  const imageUrl = url.searchParams.get('url');
+  const method = parseInt(url.searchParams.get('method') || '1');
+  
+  if (!imageUrl) return errorResponse('Missing ?url= (image URL)', 400);
+  
+  const result = await photoEnhancer(imageUrl, method);
+  return jsonResponse(result);
+}
+
 // ==================== EXPORT ====================
 
 export default {
@@ -494,9 +560,11 @@ export default {
   pinterestSearch,
   pinterestPinDetail,
   ezremove,
+  photoEnhancer,
   handleDeepAI,
   handleIloveimg,
   handlePinterestSearch,
   handlePinterestPin,
-  handleEzRemove
+  handleEzRemove,
+  handlePhotoEnhancer
 };
