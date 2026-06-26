@@ -1,6 +1,6 @@
 // tools.js - Complete Tools Services (Full Power)
 // Services: Audio Transcription, Terabox, ShieldNet, Roblox, Translate, FaceAge, Manga District
-
+import * as cheerio from 'cheerio';
 import { CONFIG } from './config.js';
 import {
   randomUUID, randomString, randomIP, md5, sha256, base64Encode, base64Decode,
