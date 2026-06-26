@@ -1,5 +1,5 @@
 // tools.js - Complete Tools Services (Full Power)
-// Services: Audio Transcription, Terabox, ShieldNet, Roblox, Translate, FaceAge
+// Services: Audio Transcription, Terabox, ShieldNet, Roblox, Translate, FaceAge, Manga District
 
 import { CONFIG } from './config.js';
 import {
@@ -402,21 +402,22 @@ const LANGUAGES = {
 
 export async function googleTranslate(text, from = 'auto', to = 'en', mode = 'text-to-text') {
   try {
-    // Translate
     const translateUrl = 'https://translate.googleapis.com/translate_a/single';
     const params = new URLSearchParams({
       client: 'gtx',
       sl: from,
       tl: to,
-      dt: 't',
-      dt: 'bd',
-      dt: 'rm',
-      dt: 'ss',
-      dt: 'md',
-      dt: 'ld',
-      dt: 'ex',
       q: text
     });
+    
+    // Add multiple dt params
+    params.append('dt', 't');
+    params.append('dt', 'bd');
+    params.append('dt', 'rm');
+    params.append('dt', 'ss');
+    params.append('dt', 'md');
+    params.append('dt', 'ld');
+    params.append('dt', 'ex');
     
     const res = await fetch(`${translateUrl}?${params.toString()}`, {
       headers: {
@@ -442,7 +443,6 @@ export async function googleTranslate(text, from = 'auto', to = 'en', mode = 'te
       }
     }
     
-    // If mode is text-to-audio, generate TTS
     if (mode === 'text-to-audio') {
       const audioBase64 = await googleTTS(translatedText || text, to);
       
@@ -458,7 +458,6 @@ export async function googleTranslate(text, from = 'auto', to = 'en', mode = 'te
       };
     }
     
-    // Text-to-text mode
     return {
       success: true,
       mode: 'text-to-text',
@@ -505,7 +504,6 @@ export async function googleTTS(text, lang = 'en') {
 
 export async function faceAgeDetect(imageUrl) {
   try {
-    // Get CSRF token and cookies
     const homeRes = await fetch('https://faceage.ai/', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36'
@@ -523,7 +521,6 @@ export async function faceAgeDetect(imageUrl) {
       return { success: false, error: 'CSRF token not found' };
     }
     
-    // Download image from URL
     const imgRes = await fetch(imageUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -536,7 +533,6 @@ export async function faceAgeDetect(imageUrl) {
     
     const imageBuffer = await imgRes.arrayBuffer();
     
-    // Upload to FaceAge
     const formData = new FormData();
     formData.append('file', new Blob([imageBuffer], { type: 'image/jpeg' }), 'image.jpg');
     formData.append('csrf_token', csrf);
@@ -560,6 +556,295 @@ export async function faceAgeDetect(imageUrl) {
     };
   } catch (error) {
     return { success: false, error: error.message };
+  }
+}
+
+// ==================== MANGA DISTRICT SCRAPER ====================
+
+const MANGA_BASE = 'https://mangadistrict.com';
+
+function clean(obj) {
+  if (obj === null || obj === undefined) return undefined;
+  if (Array.isArray(obj)) {
+    const cleaned = obj.map(i => clean(i)).filter(i => i !== undefined);
+    return cleaned.length ? cleaned : undefined;
+  }
+  if (typeof obj === 'object') {
+    const result = {};
+    for (const key of Object.keys(obj)) {
+      const val = clean(obj[key]);
+      if (val !== undefined) result[key] = val;
+    }
+    return Object.keys(result).length ? result : undefined;
+  }
+  return obj;
+}
+
+function parseChapterNumber(text) {
+  if (!text) return null;
+  const match = text.match(/(?:Vol\.?\s*\d+[:\s]*)?[Cc]h(?:apter)?\s*(\d+(?:\.\d+)?)/);
+  return match ? parseFloat(match[1]) : null;
+}
+
+export async function mangaDistrictList(url) {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9',
+        'Referer': MANGA_BASE + '/'
+      }
+    });
+    
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const items = [];
+    $('.page-item-detail.manga').each((i, el) => {
+      const $el = $(el);
+      const titleEl = $el.find('.post-title h3 a, .post-title h1 a').first();
+      const title = titleEl.text().trim();
+      const link = titleEl.attr('href');
+
+      if (!title || !link) return;
+
+      const poster = $el.find('.item-thumb img, .summary_image img').first().attr('src') || null;
+
+      let rating = null;
+      const ratingText = $el.find('.score.font-meta.total_votes, .post-rating .score').text().trim();
+      if (ratingText) {
+        const match = ratingText.match(/([\d.]+)/);
+        if (match) rating = parseFloat(match[1]);
+      }
+
+      let status = null;
+      const badges = [];
+      $el.find('.manga-title-badges .text').each((j, b) => {
+        const txt = $(b).text().trim();
+        badges.push(txt);
+        if (['Ongoing', 'Completed', 'Hiatus', 'On-Going', 'Complete'].includes(txt)) {
+          status = txt;
+        }
+      });
+
+      const chapterEl = $el.find('.list-chapter .chapter-item:first-child .chapter a').first();
+      const latestChapter = {
+        title: chapterEl.text().trim() || null,
+        url: chapterEl.attr('href') || null
+      };
+
+      let updateTime = null;
+      const timeSelectors = [
+        '.list-chapter .chapter-item:first-child .post-on .timediff',
+        '.list-chapter .chapter-item:first-child .post-on time',
+        '.chapter-date',
+        '.post-on time'
+      ];
+      for (const sel of timeSelectors) {
+        const el = $el.find(sel).first();
+        if (el.length) {
+          updateTime = el.text().trim() || el.attr('datetime') || null;
+          if (updateTime) break;
+        }
+      }
+
+      const viewsEl = $el.find('.list-chapter .chapter-item:first-child .views').first();
+      const views = viewsEl.text().trim() || null;
+
+      const genres = [];
+      const genreSelectors = [
+        '.mg_genres .summary-content a',
+        '.genres-content a',
+        '.post-content_item.mg_genres .summary-content a',
+        '.item-summary .genres a'
+      ];
+      for (const sel of genreSelectors) {
+        const found = $el.find(sel);
+        if (found.length) {
+          found.each((j, g) => genres.push($(g).text().trim()));
+          break;
+        }
+      }
+
+      const authorSelectors = ['.mg_author .summary-content', '.author-content a'];
+      let author = null;
+      for (const sel of authorSelectors) {
+        const el = $el.find(sel).first();
+        if (el.length) { author = el.text().trim() || null; break; }
+      }
+
+      items.push({
+        title,
+        link: link.startsWith('http') ? link : MANGA_BASE + link,
+        poster,
+        rating,
+        status,
+        badges,
+        latestChapter,
+        updateTime,
+        views,
+        genres,
+        author
+      });
+    });
+
+    let next = null;
+    const nextEl = $('.wp-pagenavi .page-numbers.next');
+    if (nextEl.length) next = nextEl.attr('href');
+
+    const currentPage = parseInt($('.wp-pagenavi .page-numbers.current').text()) || 1;
+
+    return clean({
+      creator: "NABEES",
+      page: 'list',
+      data: {
+        url,
+        count: items.length,
+        currentPage,
+        items,
+        next: next ? (next.startsWith('http') ? next : MANGA_BASE + next) : null
+      }
+    });
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+export async function mangaDistrictDetail(slug) {
+  try {
+    const url = slug.startsWith('http') ? slug : MANGA_BASE + '/series/' + slug.replace(/^\/+/, '');
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html',
+        'Referer': MANGA_BASE + '/'
+      }
+    });
+    
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const title = $('.profile-manga .post-title h1').text().trim() || $('meta[property="og:title"]').attr('content') || '';
+    const poster = $('.profile-manga .summary_image img').first().attr('src') || null;
+
+    const altNames = [];
+    const altEl = $('.post-content_item:contains("Alternative") .summary-content');
+    if (altEl.length) {
+      altEl.text().split(',').forEach(s => {
+        const trimmed = s.trim();
+        if (trimmed) altNames.push(trimmed);
+      });
+    }
+
+    const author = $('.mg_author .summary-content').text().trim() || null;
+    const genres = [];
+    $('.mg_genres .summary-content a, .genres-content a').each((i, el) => {
+      genres.push($(el).text().trim());
+    });
+
+    const status = $('.mg_status .summary-content').text().trim() || null;
+
+    let rating = null;
+    const ratingEl = $('.post-rating .score');
+    if (ratingEl.length) {
+      rating = parseFloat(ratingEl.text().trim());
+    }
+
+    const description = $('.description-summary').text().trim() || null;
+
+    let chapters = [];
+    $('.page-content-listing .wp-manga-chapter, .listing-chapters_wrap .wp-manga-chapter').each((i, el) => {
+      const $el = $(el);
+      const linkEl = $el.find('a').first();
+      const chapterTitle = linkEl.find('.chap-title').text().trim() || linkEl.text().trim();
+      const url = linkEl.attr('href');
+      const date = $el.find('.chap-date').text().trim() || null;
+      const number = parseChapterNumber(chapterTitle);
+
+      chapters.push({
+        number,
+        title: chapterTitle,
+        url: url ? (url.startsWith('http') ? url : MANGA_BASE + url) : null,
+        date
+      });
+    });
+
+    return clean({
+      creator: "NABEES",
+      page: 'detail',
+      data: {
+        url,
+        slug,
+        title,
+        poster,
+        altNames,
+        author,
+        genres,
+        status,
+        rating,
+        description,
+        chapters
+      }
+    });
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+export async function mangaDistrictChapter(url) {
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html',
+        'Referer': url
+      }
+    });
+    
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const title = $('.entry-header .breadcrumb span:last-child').text().trim() ||
+                  $('meta[property="og:title"]').attr('content') ||
+                  '';
+
+    const images = [];
+    $('.reading-content.manga-chapter img, .reading-content img, .page-break img').each((i, el) => {
+      const $el = $(el);
+      const src = $el.attr('src') ||
+                  $el.attr('data-src') ||
+                  $el.attr('data-lazy-src') ||
+                  null;
+      if (src && !src.startsWith('data:image')) {
+        images.push({
+          src,
+          alt: $el.attr('alt') || null,
+          index: i + 1
+        });
+      }
+    });
+
+    let prevChapter = null;
+    const prevEl = $('.nav-previous a, .nav-links a:contains("Previous")');
+    if (prevEl.length) prevChapter = prevEl.attr('href');
+
+    let nextChapter = null;
+    const nextEl = $('.nav-next a, .nav-links a:contains("Next")');
+    if (nextEl.length) nextChapter = nextEl.attr('href');
+
+    return clean({
+      creator: "NABEES",
+      page: 'chapter',
+      data: {
+        url,
+        title,
+        images,
+        prevChapter: prevChapter ? (prevChapter.startsWith('http') ? prevChapter : MANGA_BASE + prevChapter) : null,
+        nextChapter: nextChapter ? (nextChapter.startsWith('http') ? nextChapter : MANGA_BASE + nextChapter) : null
+      }
+    });
+  } catch (error) {
+    return { error: error.message };
   }
 }
 
@@ -617,6 +902,42 @@ export async function handleFaceAge(req, url) {
   return jsonResponse(result);
 }
 
+export async function handleMangaHome(req, url) {
+  const page = parseInt(url.searchParams.get('page') || '1');
+  const result = await mangaDistrictList(page === 1 ? MANGA_BASE + '/' : MANGA_BASE + `/page/${page}/`);
+  return jsonResponse(result);
+}
+
+export async function handleMangaSearch(req, url) {
+  const query = url.searchParams.get('q');
+  const page = parseInt(url.searchParams.get('page') || '1');
+  
+  if (!query) return errorResponse('Missing ?q=', 400);
+  
+  const result = await mangaDistrictList(
+    page === 1 
+      ? MANGA_BASE + `/?s=${encodeURIComponent(query)}&post_type=wp-manga`
+      : MANGA_BASE + `/page/${page}/?s=${encodeURIComponent(query)}&post_type=wp-manga`
+  );
+  return jsonResponse(result);
+}
+
+export async function handleMangaDetail(req, url) {
+  const slug = url.searchParams.get('slug');
+  if (!slug) return errorResponse('Missing ?slug=', 400);
+  
+  const result = await mangaDistrictDetail(slug);
+  return jsonResponse(result);
+}
+
+export async function handleMangaChapter(req, url) {
+  const chapterUrl = url.searchParams.get('url');
+  if (!chapterUrl) return errorResponse('Missing ?url=', 400);
+  
+  const result = await mangaDistrictChapter(chapterUrl);
+  return jsonResponse(result);
+}
+
 // ==================== EXPORT ====================
 
 export default {
@@ -627,10 +948,17 @@ export default {
   googleTranslate,
   googleTTS,
   faceAgeDetect,
+  mangaDistrictList,
+  mangaDistrictDetail,
+  mangaDistrictChapter,
   handleTranscribe,
   handleTerabox,
   handleSecurityScan,
   handleRobloxStalk,
   handleTranslate,
-  handleFaceAge
+  handleFaceAge,
+  handleMangaHome,
+  handleMangaSearch,
+  handleMangaDetail,
+  handleMangaChapter
 };
