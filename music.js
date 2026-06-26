@@ -1,16 +1,17 @@
-// music.js - Complete Music Services (Fixed Spotify & Apple Music)
+// music.js - Complete Music Services (Full Power)
+// Services: Spotify Search + Download, Apple Music, SoundCloud, Remusic AI
 
 import { CONFIG } from './config.js';
 import { randomUUID, randomString, randomIP, sleep, jsonResponse, errorResponse } from './utils.js';
 
-// ==================== SPOTIFY SEARCH (FIXED 400 ERROR) ====================
+// ==================== SPOTIFY SEARCH (FIXED) ====================
 
 export async function spotifySearch(query, limit = 5) {
   try {
     const secret = CONFIG.SPOTIFY_SECRET;
     
     if (!secret || secret.length === 0) {
-      return { success: false, error: 'Spotify secret not configured', results: [] };
+      return await iTunesFallback(query, limit);
     }
     
     const now = Date.now();
@@ -29,11 +30,7 @@ export async function spotifySearch(query, limit = 5) {
     const keyData = encoder.encode(secret);
     
     const cryptoKey = await crypto.subtle.importKey(
-      'raw', 
-      keyData, 
-      { name: 'HMAC', hash: 'SHA-1' }, 
-      false, 
-      ['sign']
+      'raw', keyData, { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']
     );
     
     const signature = await crypto.subtle.sign('HMAC', cryptoKey, buf);
@@ -52,8 +49,11 @@ export async function spotifySearch(query, limit = 5) {
       }
     });
     
+    if (tokenRes.status === 429) {
+      return await iTunesFallback(query, limit);
+    }
+    
     if (!tokenRes.ok) {
-      // Fallback to iTunes API if Spotify fails
       return await iTunesFallback(query, limit);
     }
     
@@ -68,47 +68,23 @@ export async function spotifySearch(query, limit = 5) {
       return await iTunesFallback(query, limit);
     }
     
-    // Search tracks - using correct GraphQL query format
-    const searchBody = {
-      operationName: "searchDesktop",
-      variables: {
-        searchTerm: query,
-        offset: 0,
-        limit: limit,
-        numberOfTopResults: 1,
-        includeAudiobooks: false
-      },
-      extensions: {
-        persistedQuery: {
-          version: 1,
-          sha256Hash: "5a12e5c6b1b4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a"
-        }
-      }
-    };
-    
-    const searchRes = await fetch(`https://api-partner.spotify.com/pathfinder/v1/query`, {
-      method: "POST",
+    // Search tracks
+    const searchRes = await fetch(`https://api-partner.spotify.com/pathfinder/v1/query?operationName=searchDesktop&variables=${encodeURIComponent(JSON.stringify({
+      searchTerm: query, offset: 0, limit: limit, numberOfTopResults: 1, includeAudiobooks: false
+    }))}`, {
       headers: {
         'Authorization': `Bearer ${tokenData.accessToken}`,
         'client-token': tokenData.clientToken || '',
         'User-Agent': CONFIG.UA_DESKTOP,
-        'app-platform': 'WebPlayer',
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(searchBody)
+        'app-platform': 'WebPlayer'
+      }
     });
     
     if (!searchRes.ok) {
       return await iTunesFallback(query, limit);
     }
     
-    let data;
-    try {
-      data = await searchRes.json();
-    } catch (e) {
-      return await iTunesFallback(query, limit);
-    }
-    
+    const data = await searchRes.json();
     const items = data?.data?.searchV2?.tracksV2?.items || [];
     
     const results = [];
@@ -148,12 +124,11 @@ export async function spotifySearch(query, limit = 5) {
     
     return { success: true, query, count: results.length, results, source: 'spotify' };
   } catch (error) {
-    console.error('Spotify error:', error);
     return await iTunesFallback(query, limit);
   }
 }
 
-// ==================== ITUNES FALLBACK (WORKS ALWAYS) ====================
+// ==================== ITUNES FALLBACK ====================
 
 async function iTunesFallback(query, limit = 5) {
   try {
@@ -183,10 +158,9 @@ async function iTunesFallback(query, limit = 5) {
   }
 }
 
-// ==================== APPLE MUSIC SEARCH (USING ITUNES API) ====================
+// ==================== APPLE MUSIC (ITUNES API) ====================
 
 export async function appleMusicSearch(query, limit = 5, region = 'us') {
-  // iTunes API works globally and doesn't need tokens
   try {
     const res = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(query)}&limit=${limit}&entity=song`, {
       headers: { 'User-Agent': CONFIG.UA_DESKTOP }
@@ -385,6 +359,176 @@ export async function soundcloudDownload(url) {
   }
 }
 
+// ==================== SPOTIFY SEARCH & DOWNLOAD (SPOTDOWN) ====================
+
+const SPOTDOWN_BASE = 'https://spotdown.org';
+const CF_SOLVER = 'https://cf-solver-renofc.my.id/api/solvebeta';
+
+const spotdownTokens = new Map();
+
+async function solveCloudflare() {
+  try {
+    const res = await fetch(CF_SOLVER, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: 'https://spotdown.org',
+        mode: 'waf-session'
+      })
+    });
+    
+    const data = await res.json();
+    
+    let cookieStr = '';
+    if (Array.isArray(data.cookies)) {
+      cookieStr = data.cookies.map(c => `${c.name}=${c.value}`).join('; ');
+    }
+    
+    return {
+      headers: data.headers || {},
+      cookie: cookieStr
+    };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+async function getTurnstileToken() {
+  try {
+    const res = await fetch(CF_SOLVER, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: 'https://spotdown.org',
+        mode: 'turnstile-min',
+        siteKey: '0x4AAAAAACrWMhU5hqsstO80'
+      })
+    });
+    
+    const data = await res.json();
+    const token = data.token?.result?.token || data.result?.token || data.token;
+    
+    if (!token) throw new Error('Turnstile failed');
+    return token;
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+async function issueNonce(session) {
+  try {
+    const cfToken = await getTurnstileToken();
+    if (cfToken.error) throw new Error(cfToken.error);
+    
+    const res = await fetch(`${SPOTDOWN_BASE}/api/issue-nonce`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cookie': session.cookie,
+        ...session.headers
+      },
+      body: JSON.stringify({ cfToken })
+    });
+    
+    const data = await res.json();
+    if (!data.token) throw new Error('Nonce issuance failed');
+    
+    return {
+      token: data.token,
+      expires: data.expires || Date.now() + 600000
+    };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+async function ensureToken(session) {
+  if (session.token && Date.now() + 180000 < session.expires) {
+    return session.token;
+  }
+  
+  const result = await issueNonce(session);
+  if (result.error) throw new Error(result.error);
+  
+  session.token = result.token;
+  session.expires = result.expires;
+  return session.token;
+}
+
+export async function spotifySearchDownload(query) {
+  try {
+    const session = await solveCloudflare();
+    if (session.error) return { error: `CF solver error: ${session.error}` };
+    
+    await ensureToken(session);
+    
+    const res = await fetch(`${SPOTDOWN_BASE}/api/song-details?url=${encodeURIComponent(query)}`, {
+      headers: {
+        'Accept': 'application/json, text/plain, */*',
+        'Cookie': session.cookie,
+        'X-Session-Token': session.token,
+        ...session.headers
+      }
+    });
+    
+    const data = await res.json();
+    const songs = data.songs || [];
+    
+    return {
+      success: true,
+      query: query,
+      count: songs.length,
+      songs: songs.map(s => ({
+        title: s.title,
+        artist: s.artist,
+        duration: s.duration,
+        url: s.url,
+        album: s.album,
+        cover: s.cover
+      }))
+    };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+export async function spotifyDownload(url) {
+  try {
+    const session = await solveCloudflare();
+    if (session.error) return { error: `CF solver error: ${session.error}` };
+    
+    await ensureToken(session);
+    
+    const res = await fetch(`${SPOTDOWN_BASE}/api/direct-download?url=${encodeURIComponent(url)}&token=${session.token}`, {
+      headers: {
+        'Cookie': session.cookie,
+        'X-Session-Token': session.token,
+        ...session.headers
+      }
+    });
+    
+    if (!res.ok) {
+      return { error: `Download failed: ${res.status}` };
+    }
+    
+    const audioBuffer = await res.arrayBuffer();
+    const disposition = res.headers.get('content-disposition') || '';
+    const nameMatch = disposition.match(/filename="?([^";\n]+)"?/);
+    const filename = nameMatch ? nameMatch[1] : `${Date.now()}.mp3`;
+    const audioBase64 = btoa(String.fromCharCode(...new Uint8Array(audioBuffer)));
+    
+    return {
+      success: true,
+      filename: filename,
+      audio_base64: audioBase64,
+      size: audioBuffer.byteLength,
+      url: url
+    };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
 // ==================== ROUTE HANDLERS ====================
 
 export async function handleSpotify(req, url) {
@@ -392,6 +536,20 @@ export async function handleSpotify(req, url) {
   if (!q) return errorResponse('Missing ?q=', 400);
   const limit = Math.min(parseInt(url.searchParams.get('limit') || '5'), 20);
   const result = await spotifySearch(q, limit);
+  return jsonResponse(result);
+}
+
+export async function handleSpotifySearch(req, url) {
+  const q = url.searchParams.get('q');
+  if (!q) return errorResponse('Missing ?q=', 400);
+  const result = await spotifySearchDownload(q);
+  return jsonResponse(result);
+}
+
+export async function handleSpotifyDownload(req, url) {
+  const trackUrl = url.searchParams.get('url');
+  if (!trackUrl) return errorResponse('Missing ?url=', 400);
+  const result = await spotifyDownload(trackUrl);
   return jsonResponse(result);
 }
 
@@ -435,10 +593,14 @@ export default {
   soundcloudSearch,
   remusicGenerate,
   soundcloudDownload,
+  spotifySearchDownload,
+  spotifyDownload,
+  iTunesFallback,
   handleSpotify,
+  handleSpotifySearch,
+  handleSpotifyDownload,
   handleAppleMusic,
   handleSoundCloud,
   handleRemusic,
-  handleSoundCloudDL,
-  iTunesFallback
+  handleSoundCloudDL
 };
