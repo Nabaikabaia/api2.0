@@ -96,7 +96,7 @@ export async function chatdayChat(prompt, model, sessionId = null) {
   }
 }
 
-// ==================== PERPLEXITY AI ====================
+// ==================== PERPLEXITY AI (FIXED) ====================
 
 export async function perplexitySearch(query, options = {}, retryCount = 0) {
   const { mode = "concise", focus = "internet" } = options;
@@ -209,7 +209,8 @@ export async function perplexitySearch(query, options = {}, retryCount = 0) {
       } catch {}
     }
     
-    if (lastChunk?.sources) {
+    // FIX: Check if sources is an array before mapping
+    if (lastChunk?.sources && Array.isArray(lastChunk.sources)) {
       sources = lastChunk.sources.map(s => ({
         title: s.name || s.title || "",
         url: s.url || s.link || "",
