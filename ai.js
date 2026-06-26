@@ -1,5 +1,5 @@
-// ai.js - COMPLETE AI CHAT SERVICES (FULL POWER)
-// Includes: Chatday, Perplexity, Blackbox, Tongyi, Copilot, DuckAI, Quillbot, Asyntai, Gemini
+// ai.js - Complete AI Chat Services (Full Power)
+// Services: Chatday (20+ models), Perplexity, Blackbox, Tongyi, Copilot, DuckAI, Quillbot, Asyntai
 
 import { CONFIG } from './config.js';
 import {
