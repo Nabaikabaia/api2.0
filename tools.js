@@ -1,6 +1,7 @@
 // tools.js - Complete Tools Services (Full Power)
 // Services: Audio Transcription, Terabox, ShieldNet, Roblox, Translate, FaceAge, Manga District
 import * as cheerio from 'cheerio';
+import { createCipheriv, publicEncrypt, constants } from 'node:crypto';
 import { CONFIG } from './config.js';
 import {
   randomUUID, randomString, randomIP, md5, sha256, base64Encode, base64Decode,
@@ -19,7 +20,7 @@ export async function transcribeAudio(audioUrl, options = {}) {
     const aesSecret = randomString(16);
     
     const aesEncrypt = (plain, secret) => {
-      const cipher = crypto.createCipheriv("aes-128-cbc", Buffer.from(secret, "utf8"), Buffer.from(secret, "utf8"));
+      const cipher = createCipheriv("aes-128-cbc", Buffer.from(secret, "utf8"), Buffer.from(secret, "utf8"));
       return Buffer.concat([cipher.update(plain, "utf8"), cipher.final()]).toString("base64");
     };
     
@@ -33,8 +34,8 @@ r/myG9S+9cR5huTuFQIDAQAB
 -----END PUBLIC KEY-----`;
     
     const rsaEncrypt = (plain, publicKey) => {
-      return crypto.publicEncrypt(
-        { key: publicKey, padding: crypto.constants.RSA_PKCS1_PADDING },
+      return publicEncrypt(
+        { key: publicKey, padding: constants.RSA_PKCS1_PADDING },
         Buffer.from(plain, "utf8")
       ).toString("base64");
     };
