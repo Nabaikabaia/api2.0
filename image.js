@@ -112,10 +112,25 @@ export async function iloveimgUpscale(imageUrl, scale = 4, options = {}) {
     const ext = contentType.split('/')[1] || 'jpg';
     const filename = `image.${ext}`;
     
+    // Get public JWT from iloveimg web app
+    const webRes = await fetch(CONFIG.ENDPOINTS.ILOVEIMG_WEB + '/upscale-image', {
+      headers: { 'User-Agent': CONFIG.UA_DESKTOP, 'Accept': 'text/html' }
+    });
+    const html = await webRes.text();
+    const jwtMatch = html.match(/["']?jwt["']?s*:s*["']([A-Za-z0-9._-]{40,})["']/) ||
+                     html.match(/token["']?s*:s*["']([A-Za-z0-9._-]{40,})["']/) ||
+                     html.match(/"auth"s*:s*"([A-Za-z0-9._-]{40,})"/) ||
+                     html.match(/eyJ[A-Za-z0-9._-]{30,}/);
+    const iloveJwt = jwtMatch ? jwtMatch[1] || jwtMatch[0] : null;
+    
+    if (!iloveJwt) {
+      return { error: 'Unable to obtain iloveimg API token. The service may require authentication.' };
+    }
+    
     const ip = randomIP();
     const headers = {
       'user-agent': CONFIG.UA_DESKTOP,
-      'authorization': 'Bearer ' + CONFIG.FALLBACKS.BLACKBOX_FALLBACK_VALIDATED,
+      'authorization': 'Bearer ' + iloveJwt,
       'origin': CONFIG.ENDPOINTS.ILOVEIMG_WEB,
       'referer': CONFIG.ENDPOINTS.ILOVEIMG_WEB + '/',
       'x-forwarded-for': ip,
@@ -129,7 +144,7 @@ export async function iloveimgUpscale(imageUrl, scale = 4, options = {}) {
     const startData = await startRes.json();
     
     if (!startData.server || !startData.task) {
-      return { error: 'Failed to start upscale task' };
+      return { error: 'Failed to start upscale task — iloveimg API may require a paid account. Try /api/image/enhance instead.' };
     }
     
     const api = `https://${startData.server}`;
