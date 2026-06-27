@@ -1,5 +1,6 @@
 // utils.js - Complete Utilities with Clean Response Format
 
+import { createHash } from 'node:crypto';
 import { CONFIG } from './config.js';
 
 // ==================== CRYPTO & ID GENERATORS ====================
@@ -15,11 +16,11 @@ export const randomUUID = () => crypto.randomUUID();
 
 export const randomIP = () => Array.from({ length: 4 }, () => 1 + Math.floor(Math.random() * 254)).join(".");
 
-export const md5 = (s) => crypto.createHash("md5").update(s).digest("hex");
+export const md5 = (s) => createHash("md5").update(typeof s === 'string' ? s : Buffer.from(s)).digest("hex");
 
-export const sha256 = (s) => crypto.createHash("sha256").update(s).digest("hex");
+export const sha256 = (s) => createHash("sha256").update(typeof s === 'string' ? s : Buffer.from(s)).digest("hex");
 
-export const sha1 = (s) => crypto.createHash("sha1").update(s).digest("hex");
+export const sha1 = (s) => createHash("sha1").update(typeof s === 'string' ? s : Buffer.from(s)).digest("hex");
 
 export const base64Encode = (obj) => {
   const str = JSON.stringify(obj);
