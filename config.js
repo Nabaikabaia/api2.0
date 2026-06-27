@@ -68,7 +68,7 @@ export const CONFIG = {
     SAVEFROM_WORKER: "https://worker.savefrom.net",
     INSTAGRAM: "https://igram.world",
     INSTAGRAM_API: "https://api-wh.igram.world",
-    TIKWM: "https://www.tikwm.com/api",
+    TIKWM: "https://www.tikwm.com",
     TIKTOK: "https://www.tiktok.com",
     
     // Image Tools
