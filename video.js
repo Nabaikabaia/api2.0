@@ -1,6 +1,7 @@
 // video.js - Complete Video Services
 // Services: SaveFrom (Universal), Instagram, TikTok, Vidbox Movies
 
+import * as cheerio from 'cheerio';
 import { CONFIG } from './config.js';
 import {
   randomUUID, randomString, randomIP,
@@ -216,14 +217,14 @@ export async function tiktokDownload(url) {
     
     // tikwm sometimes returns HTML when IP is rate-limited; fall back to douyin.wtf
     if (rawText.includes('<!DOCTYPE') || rawText.includes('<html')) {
-      return await tiktokDownloadFallback(url);
+      return await tiktokDownloadMusicaldown(url);
     }
     
     let data;
-    try { data = JSON.parse(rawText); } catch { return await tiktokDownloadFallback(url); }
+    try { data = JSON.parse(rawText); } catch { return await tiktokDownloadMusicaldown(url); }
     
     if (data.code !== 0 || !data.data) {
-      return await tiktokDownloadFallback(url);
+      return await tiktokDownloadMusicaldown(url);
     }
     
     const video = data.data;
@@ -272,6 +273,75 @@ export async function tiktokDownload(url) {
   }
 }
 
+
+
+// ==================== TIKTOK DOWNLOAD via musicaldown.com ====================
+async function tiktokDownloadMusicaldown(url) {
+  try {
+    const homeRes = await fetch('https://musicaldown.com/en', {
+      headers: {
+        'User-Agent': CONFIG.UA_DESKTOP,
+        'Accept': 'text/html',
+        'Accept-Language': 'en-US,en;q=0.9'
+      }
+    });
+    const homeHtml = await homeRes.text();
+    const cookies = homeRes.headers.getSetCookie?.()?.map(c => c.split(';')[0]).join('; ') || '';
+
+    // Extract CSRF-like hidden token (name changes per session)
+    const tokenMatch = homeHtml.match(/<input\s+name="([^"]+)"\s+type="hidden"\s+value="([a-f0-9]{30,})"/i)
+                    || homeHtml.match(/<input\s+type="hidden"\s+name="([^"]+)"\s+value="([a-f0-9]{30,})"/i);
+    if (!tokenMatch) return { error: 'musicaldown: token not found', provider: 'musicaldown' };
+    const [, tokenName, tokenValue] = tokenMatch;
+
+    const form = new URLSearchParams({ [tokenName]: tokenValue, verify: '1', link: url });
+    const dlRes = await fetch('https://musicaldown.com/download', {
+      method: 'POST',
+      headers: {
+        'User-Agent': CONFIG.UA_DESKTOP,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Referer': 'https://musicaldown.com/en',
+        'Origin': 'https://musicaldown.com',
+        'Cookie': cookies
+      },
+      body: form.toString()
+    });
+
+    const html = await dlRes.text();
+    if (html.includes('<!DOCTYPE') && !html.includes('download')) {
+      return { error: 'musicaldown returned HTML error page', provider: 'musicaldown' };
+    }
+
+    // Extract download links via regex (avoid cheerio dep in this file)
+    const noWmMatch = html.match(/href="(https://[^"]*(?:v19|tiktok|muscdn|tikcdn)[^"]*)"[^>]*>\s*[^<]*[Nn]o.watermark/is)
+                   || html.match(/class="[^"]*btn[^"]*"\s+href="(https://[^"]{30,})"(?:[^>]*)>\s*Download MP4/is);
+    const noWatermark = noWmMatch?.[1];
+
+    // Broader fallback: grab first large CDN link
+    const allLinks = [...html.matchAll(/href="(https://[^"]{30,})"/g)].map(m => m[1])
+      .filter(l => l.includes('cdn') || l.includes('tiktok') || l.includes('musical') || l.includes('muscdn') || l.includes('tikcdn') || l.includes('akamai'));
+
+    const titleMatch = html.match(/<h2[^>]*>([^<]{3,100})</h2>/i);
+    const authorMatch = html.match(/<h4[^>]*>([^<]{2,60})</h4>/i);
+
+    if (!allLinks.length && !noWatermark) {
+      return { error: 'musicaldown: no download links found', provider: 'musicaldown' };
+    }
+
+    return {
+      success: true,
+      title: titleMatch?.[1]?.trim() || null,
+      author: { username: authorMatch?.[1]?.trim() || null },
+      videos: {
+        no_watermark: noWatermark || allLinks[0],
+        with_watermark: allLinks[1] || null
+      },
+      provider: 'musicaldown'
+    };
+  } catch (error) {
+    return { error: error.message, provider: 'musicaldown' };
+  }
+}
 
 // ==================== TIKTOK DOWNLOAD FALLBACK (douyin.wtf) ====================
 
