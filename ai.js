@@ -236,12 +236,12 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
   // blackbox.ai /api/chat now returns "Deprecated endpoint" for all requests.
   // Routing to chatday.ai claude-3-haiku as a fully-capable replacement.
   try {
-    const result = await chatdayChat(prompt, 'claude3haiku', sessionId);
+    const result = await chatdayChat(prompt, 'gpt4omini', sessionId);
     if (result.error) return { error: result.error };
     return {
       reply: result.result,
       session: result.session || null,
-      model: 'claude-3-haiku',
+      model: 'gpt-4o-mini',
       provider: 'chatday'
     };
   } catch (error) {
