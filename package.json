@@ -1,0 +1,9 @@
+{
+  "name": "nabees-api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Nabees API - Cloudflare Workers",
+  "dependencies": {
+    "cheerio": "^1.0.0"
+  }
+}
