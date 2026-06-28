@@ -333,9 +333,8 @@ async function tiktokDownloadMusicaldown(url) {
 
     const videoLinks = [...allLinks, ...dataUrls].filter(Boolean);
 
-    const titleRe = new RegExp('<h2[^>]*>([^<]{3,120})<\/h2>', 'i');
+    // musicaldown download page doesn't expose video title - skip generic site headers
     const authorRe = new RegExp('<h4[^>]*>([^<]{2,60})<\/h4>', 'i');
-    const titleMatch = html.match(titleRe);
     const authorMatch = html.match(authorRe);
 
     if (!videoLinks.length) {
@@ -344,7 +343,7 @@ async function tiktokDownloadMusicaldown(url) {
 
     return {
       success: true,
-      title: titleMatch?.[1]?.trim() || null,
+      title: null,
       author: { username: authorMatch?.[1]?.trim() || null },
       videos: {
         no_watermark: videoLinks[0] || null,
