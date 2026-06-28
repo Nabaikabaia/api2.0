@@ -1,7 +1,6 @@
 // video.js - Complete Video Services
 // Services: SaveFrom (Universal), Instagram, TikTok, Vidbox Movies
 
-import * as cheerio from 'cheerio';
 import { CONFIG } from './config.js';
 import {
   randomUUID, randomString, randomIP,
@@ -309,20 +308,21 @@ async function tiktokDownloadMusicaldown(url) {
 
     const html = await dlRes.text();
     if (html.includes('<!DOCTYPE') && !html.includes('download')) {
-      return { error: 'musicaldown returned HTML error page', provider: 'musicaldown' };
+      return { error: 'musicaldown returned error page', provider: 'musicaldown' };
     }
 
-    // Extract download links via regex (avoid cheerio dep in this file)
-    const noWmMatch = html.match(/href="(https://[^"]*(?:v19|tiktok|muscdn|tikcdn)[^"]*)"[^>]*>\s*[^<]*[Nn]o.watermark/is)
-                   || html.match(/class="[^"]*btn[^"]*"\s+href="(https://[^"]{30,})"(?:[^>]*)>\s*Download MP4/is);
-    const noWatermark = noWmMatch?.[1];
+    // Use RegExp constructor to avoid regex delimiter escaping issues with URLs
+    const noWmRe = new RegExp('href="(https://[^"]*(?:v19|tiktok|muscdn|tikcdn|cdn)[^"]*)"[^>]*>[^<]*(?:[Nn]o.watermark|without)', 'i');
+    const noWatermark = html.match(noWmRe)?.[1];
 
-    // Broader fallback: grab first large CDN link
-    const allLinks = [...html.matchAll(/href="(https://[^"]{30,})"/g)].map(m => m[1])
+    const allLinksRe = new RegExp('href="(https://[^"]{30,})"', 'g');
+    const allLinks = [...html.matchAll(allLinksRe)].map(m => m[1])
       .filter(l => l.includes('cdn') || l.includes('tiktok') || l.includes('musical') || l.includes('muscdn') || l.includes('tikcdn') || l.includes('akamai'));
 
-    const titleMatch = html.match(/<h2[^>]*>([^<]{3,100})</h2>/i);
-    const authorMatch = html.match(/<h4[^>]*>([^<]{2,60})</h4>/i);
+    const titleRe = new RegExp('<h2[^>]*>([^<]{3,100})<\/h2>', 'i');
+    const authorRe = new RegExp('<h4[^>]*>([^<]{2,60})<\/h4>', 'i');
+    const titleMatch = html.match(titleRe);
+    const authorMatch = html.match(authorRe);
 
     if (!allLinks.length && !noWatermark) {
       return { error: 'musicaldown: no download links found', provider: 'musicaldown' };
@@ -333,7 +333,7 @@ async function tiktokDownloadMusicaldown(url) {
       title: titleMatch?.[1]?.trim() || null,
       author: { username: authorMatch?.[1]?.trim() || null },
       videos: {
-        no_watermark: noWatermark || allLinks[0],
+        no_watermark: noWatermark || allLinks[0] || null,
         with_watermark: allLinks[1] || null
       },
       provider: 'musicaldown'
@@ -342,6 +342,7 @@ async function tiktokDownloadMusicaldown(url) {
     return { error: error.message, provider: 'musicaldown' };
   }
 }
+
 
 // ==================== TIKTOK DOWNLOAD FALLBACK (douyin.wtf) ====================
 
