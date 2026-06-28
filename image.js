@@ -248,78 +248,78 @@ function getImageDimensions(buffer) {
 export async function pinterestSearch(query, options = {}) {
   const { limit = 20 } = options;
   try {
-    const searchUrl = `https://www.pinterest.com/search/pins/?q=${encodeURIComponent(query)}&rs=typed`;
+    // Pinterest API requires auth; use Bing image search filtered to pinterest.com
+    const searchQuery = encodeURIComponent(query + ' site:pinterest.com');
+    const bingUrl = `https://www.bing.com/images/search?q=${searchQuery}&form=HDRSC2&first=1&tsc=ImageHoverTitle`;
 
-    // Step 1: Fetch search page (Pinterest embeds pin data as JSON in __PWS_DATA__)
-    const pageRes = await fetch(searchUrl, {
+    const pageRes = await fetch(bingUrl, {
       headers: {
         'User-Agent': CONFIG.UA_DESKTOP,
         'Accept': 'text/html,application/xhtml+xml',
         'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache',
-        'Referer': 'https://www.pinterest.com/'
+        'Referer': 'https://www.bing.com/'
       }
     });
     const html = await pageRes.text();
 
-    // Step 2: Extract the __PWS_DATA__ JSON blob
-    const pwsMatch = html.match(/<script id="__PWS_DATA__"[^>]*>(.+?)<\/script>/s)
-                  || html.match(/__PWS_DATA__\s*=\s*({.+?});\s*<\/script>/s);
-    
-    if (!pwsMatch) {
-      return { error: 'Pinterest: could not find embedded data', results: [] };
-    }
-
-    let pdata;
-    try { pdata = JSON.parse(pwsMatch[1]); } catch { return { error: 'Pinterest: JSON parse failed', results: [] }; }
-
-    // Step 3: Navigate to pins in the JSON structure
-    // Pins can be in resourceDataCache or initialReduxState or routeTree
-    const str = JSON.stringify(pdata);
-    
-    // Extract pin objects: look for {id, images, description, pinner} patterns
-    const pinBlocks = [];
-    
-    // Pattern: pin images in the JSON
-    const imgMatches = [...str.matchAll(/"images":\{"[0-9]+x[0-9]+":\{"url":"(https:\/\/i\.pinimg\.com[^"]+)"/g)];
-    const descMatches = [...str.matchAll(/"description":"([^"]{0,200})"/g)];
-    const idMatches = [...str.matchAll(/"id":"(\d{15,20})"/g)];
-    
+    // Bing encodes image data in murl (media URL) JSON blobs
+    // Extract from m={...} JSON in iusc attributes
     const results = [];
     const seen = new Set();
-    
-    imgMatches.forEach((m, i) => {
-      const imgUrl = m[1].replace(/\\u002F/g, '/').replace(/\\/g, '');
-      if (seen.has(imgUrl)) return;
-      seen.add(imgUrl);
-      
-      const pinId = idMatches[i]?.[1] || idMatches[0]?.[1] || null;
-      const desc = descMatches[i]?.[1] || descMatches[0]?.[1] || null;
-      
-      results.push({
-        id: pinId,
-        title: desc ? desc.substring(0, 120) : null,
-        image: imgUrl,
-        pin_url: pinId ? `https://www.pinterest.com/pin/${pinId}/` : null,
-        thumbnail: imgUrl.replace('/originals/', '/236x/').replace('/736x/', '/236x/')
-      });
-    });
 
-    if (results.length === 0) {
-      return { error: 'Pinterest: no pins found (search may require login)', results: [] };
+    // Primary: extract from JSON-encoded iusc data attributes
+    const iuscMatches = [...html.matchAll(/iusc="([^"]+)"/g)];
+    for (const m of iuscMatches) {
+      try {
+        const decoded = m[1].replace(/&amp;/g, '&').replace(/&quot;/g, '"');
+        const obj = JSON.parse(decoded);
+        const imgUrl = obj.murl;
+        const pageUrl = obj.purl || obj.md?.purl;
+        if (!imgUrl || seen.has(imgUrl)) continue;
+        seen.add(imgUrl);
+        // Only keep Pinterest URLs
+        if (!pageUrl?.includes('pinterest.')) continue;
+        results.push({
+          id: null,
+          title: obj.t || null,
+          image: imgUrl,
+          pin_url: pageUrl || null,
+          thumbnail: imgUrl
+        });
+        if (results.length >= limit) break;
+      } catch {}
     }
 
-    return clean({
+    // Fallback: extract murl from JSON in <a class="iusc"> attributes
+    if (results.length === 0) {
+      const murlMatches = [...html.matchAll(/"murl":"([^"]+)"/g)];
+      const purlMatches = [...html.matchAll(/"purl":"([^"]+)"/g)];
+      murlMatches.forEach((m, i) => {
+        const imgUrl = m[1].replace(/\\/g, '');
+        const pageUrl = purlMatches[i]?.[1]?.replace(/\\/g, '') || '';
+        if (seen.has(imgUrl) || !imgUrl.startsWith('http')) return;
+        if (!pageUrl.includes('pinterest.')) return;
+        seen.add(imgUrl);
+        results.push({ id: null, title: null, image: imgUrl, pin_url: pageUrl, thumbnail: imgUrl });
+      });
+    }
+
+    if (results.length === 0) {
+      return { error: 'Pinterest: no results (search may be blocked)', results: [] };
+    }
+
+    return {
       creator: "NABEES",
       query,
-      count: results.slice(0, limit).length,
+      count: results.length,
       results: results.slice(0, limit)
-    });
+    };
 
   } catch (error) {
     return { error: error.message, results: [] };
   }
 }
+
 
 // ==================== PINTEREST PIN DETAIL ====================
 
