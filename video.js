@@ -120,12 +120,6 @@ export async function instagramDownload(url) {
     const html = await homeRes.text();
     const cookies = homeRes.headers.getSetCookie?.()?.map(c => c.split(';')[0]).join('; ') || '';
     
-    // Extract app.js
-    const appMatch = html.match(/\/js\/app\.js\?id=([a-f0-9]+)/);
-    if (!appMatch) {
-      return { error: 'Could not find app.js' };
-    }
-    
     // Detect content type
     let endpoint, body;
     if (url.includes('/reel/') || url.includes('/p/') || url.includes('/tv/')) {
@@ -212,15 +206,24 @@ export async function tiktokDownload(url) {
       headers: {
         'Content-Type': 'application/x-www-form-urlencoded',
         'User-Agent': CONFIG.UA_MOBILE,
-        'Referer': 'https://www.tikwm.com/'
+        'Referer': 'https://www.tikwm.com/',
+        'Accept': 'application/json'
       },
-      body: new URLSearchParams({ url: url })
+      body: new URLSearchParams({ url: url, hd: '1' })
     });
     
-    const data = await res.json();
+    const rawText = await res.text();
+    
+    // tikwm sometimes returns HTML when IP is rate-limited; fall back to douyin.wtf
+    if (rawText.includes('<!DOCTYPE') || rawText.includes('<html')) {
+      return await tiktokDownloadFallback(url);
+    }
+    
+    let data;
+    try { data = JSON.parse(rawText); } catch { return await tiktokDownloadFallback(url); }
     
     if (data.code !== 0 || !data.data) {
-      return { error: data.msg || 'Download failed' };
+      return await tiktokDownloadFallback(url);
     }
     
     const video = data.data;
@@ -266,6 +269,54 @@ export async function tiktokDownload(url) {
     
   } catch (error) {
     return { error: error.message, provider: 'tikwm' };
+  }
+}
+
+
+// ==================== TIKTOK DOWNLOAD FALLBACK (douyin.wtf) ====================
+
+async function tiktokDownloadFallback(url) {
+  try {
+    const res = await fetch(`https://api.douyin.wtf/api/hybrid/video_data?url=${encodeURIComponent(url)}&minimal=false`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36',
+        'Accept': 'application/json'
+      }
+    });
+    const data = await res.json();
+    const v = data?.aweme_detail;
+    if (!v) return { error: 'TikTok download failed — video may be private or deleted', provider: 'fallback' };
+    return {
+      success: true,
+      id: v.aweme_id,
+      title: v.desc,
+      duration: v.video?.duration,
+      cover: v.video?.cover?.url_list?.[0],
+      music: {
+        title: v.music?.title,
+        author: v.music?.author,
+        url: v.music?.play_url?.url_list?.[0]
+      },
+      author: {
+        username: v.author?.unique_id || v.author?.uid,
+        nickname: v.author?.nickname,
+        avatar: v.author?.avatar_thumb?.url_list?.[0]
+      },
+      statistics: {
+        play_count: v.statistics?.play_count,
+        digg_count: v.statistics?.digg_count,
+        comment_count: v.statistics?.comment_count,
+        share_count: v.statistics?.share_count
+      },
+      videos: {
+        no_watermark: v.video?.play_addr?.url_list?.[0],
+        watermark: v.video?.download_addr?.url_list?.[0],
+        hd: v.video?.bit_rate?.[0]?.play_addr?.url_list?.[0]
+      },
+      provider: 'douyin.wtf'
+    };
+  } catch (error) {
+    return { error: error.message, provider: 'fallback' };
   }
 }
 
@@ -331,7 +382,7 @@ export async function tiktokSearch(query, limit = 10, cursor = 0) {
 
 export async function tiktokTrending(limit = 20) {
   try {
-    const res = await fetch(`https://www.tikwm.com/api/feed/list?count=${limit}`, {
+    const res = await fetch(`https://www.tikwm.com/api/feed/list?count=${limit}&region=US`, {
       headers: {
         'User-Agent': CONFIG.UA_MOBILE,
         'Referer': 'https://www.tikwm.com/'
