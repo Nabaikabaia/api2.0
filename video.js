@@ -382,7 +382,7 @@ export async function tiktokSearch(query, limit = 10, cursor = 0) {
 
 export async function tiktokTrending(limit = 20) {
   try {
-    const res = await fetch(`https://www.tikwm.com/api/feed/list?count=${limit}&region=US`, {
+    const res = await fetch(`https://www.tikwm.com/api/feed/list?count=${limit}&region=ID`, {
       headers: {
         'User-Agent': CONFIG.UA_MOBILE,
         'Referer': 'https://www.tikwm.com/'
@@ -391,11 +391,11 @@ export async function tiktokTrending(limit = 20) {
     
     const data = await res.json();
     
-    if (data.code !== 0 || !data.data?.videos) {
+    if (data.code !== 0 || !Array.isArray(data.data) || data.data.length === 0) {
       return { error: data.msg || 'Failed to fetch trending', results: [] };
     }
     
-    const results = data.data.videos.map(v => ({
+    const results = data.data.map(v => ({
       id: v.video_id,
       title: v.title,
       duration: v.duration,
