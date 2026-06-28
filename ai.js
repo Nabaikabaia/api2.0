@@ -258,7 +258,7 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
     
     const payload = {
       messages: messages,
-      userSelectedAgent: "VscodeAgent",
+      userSelectedAgent: null,
       userSelectedModel: null,
       maxTokens: maxTokens,
       validated: validated,
@@ -288,7 +288,7 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
     const answerMatch = raw.match(/<answer>([\s\S]*?)<\/answer>/);
     let answer = answerMatch ? answerMatch[1].trim() : raw.trim();
     
-    if (!answer || answer.includes("deprecated") || answer.length < 5) {
+    if (!answer || answer.toLowerCase().includes("deprecated") || answer.length < 5) {
       try {
         const jsonMatch = raw.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
@@ -299,7 +299,7 @@ export async function blackboxChat(prompt, sessionId = null, options = {}) {
         }
       } catch {}
       
-      if (!answer || answer.includes("deprecated") || answer.length < 5) {
+      if (!answer || answer.toLowerCase().includes("deprecated") || answer.length < 5) {
         answer = "I'm here to help! What would you like to know?";
       }
     }
@@ -395,7 +395,7 @@ export async function tongyiChat(prompt, sessionId = null, options = {}) {
           if (evt.msgStatus === "finished") finalEvent = evt;
           if (evt.contents) {
             for (const content of evt.contents) {
-              if (content.contentType === "text") fullReply += content.content;
+              if (content.contentType === "text") fullReply = content.content; // overwrite: Tongyi sends cumulative text per event
             }
           }
         } catch {}
@@ -506,57 +506,46 @@ export async function copilotChat(prompt, model = 'default') {
 
 export async function duckChat(prompt, model = 'gpt-5-mini') {
   try {
+    // Fetch fresh VQD hash from status endpoint
+    const statusRes = await fetch('https://duck.ai/duckchat/v1/status', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
+        'x-vqd-accept': '1',
+        'Referer': 'https://duck.ai/',
+        'Origin': 'https://duck.ai'
+      }
+    });
+    const vqdHash = statusRes.headers.get('x-vqd-hash-1');
+    if (!vqdHash) return { error: 'Could not get VQD hash from duck.ai' };
+
+    const journeyId = randomString(32);
     const messageId = randomUUID();
     const conversationId = randomUUID();
-    const journeyId = randomString(32);
-    
+
     const payload = {
       model: model,
-      metadata: {
-        toolChoice: {
-          NewsSearch: false,
-          VideosSearch: false,
-          LocalSearch: false,
-          WeatherForecast: false
-        }
-      },
+      metadata: { toolChoice: { NewsSearch: false, VideosSearch: false, LocalSearch: false, WeatherForecast: false } },
       messages: [{ role: "user", content: prompt }],
       canUseTools: true,
       reasoningEffort: "minimal",
       canUseApproxLocation: null,
-      canDelegateImageGeneration: null,
-      durableStream: {
-        messageId: messageId,
-        conversationId: conversationId,
-        publicKey: {
-          alg: "RSA-OAEP-256",
-          e: "AQAB",
-          ext: true,
-          key_ops: ["encrypt"],
-          kty: "RSA",
-          n: "pjxk580D6CN5b3u5TR_XEQqrv7V4459F4lyt6mV_w5pdJjr8e0ILRmeR6k-yiC-RjaKUXLO5rPvGXzd5CixEs6tgqAmMJntA8tlA5H_E9-YuvHyPSTs4BUBIEqMAK1srpz1PAy8Xi9O4bN4i2FreokKKOJMMpvFt_rGzBnbpjlyE6fdHTmJCUFrjSyxlD-D4tklTMDs-0HjUNynfr6k6-PJvPguLIYq7L_NjCA7kcFUHXzQnWQjmpXGTm0NqPXeYUnL3y2jsirBePfYW_SNaB6TePEGoMSQL8rsqP67Snz0sBo7WKGdbYjH2jXv7bBU4rZZXcRK1Rk-w076IiH3Q_w",
-          use: "enc"
-        }
-      }
+      canDelegateImageGeneration: null
     };
-    
+
     const res = await fetch('https://duck.ai/duckchat/v1/chat', {
       method: 'POST',
       headers: {
-        'authority': 'duck.ai',
         'accept': 'text/event-stream',
         'content-type': 'application/json',
         'origin': 'https://duck.ai',
         'referer': 'https://duck.ai/',
         'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
         'x-ddg-journey-id': journeyId,
-        'x-fe-signals': `eyJzdGFydCI6${Date.now()}LCJldmVudHMiOltdLCJlbmQiOjB9`,
-        'x-fe-version': 'serp_20260615_183429_ET-ec17a44c4ba5177d076644699c451976233a9143',
-        'x-vqd-hash-1': 'eyJzZXJ2ZXJfaGFzaGVzIjpbIjF5cDZvWEg1U1puWmtlZThValorWVpXVGt3WS9pWUd1TXlmV0pRM2d2Z0k9IiwiWnUvVGFJR3lLY2s4T0xDQVZZakI5eGl1ajlQcGd2V2V1WEUzUE1ubVJwbz0iLCJKL09xODg2N0tDUFZKcjE5TGJoemhaai9mLzhUeFRYdzhWeWhZazNRc2pFPSJdLCJjbGllbnRfaGFzaGVzIjpbIkFiTkpDQmJ2Njk4d3Z2SnNkTkNZNDBXOFlIeUhmWm9EVEVHS3Rhd2xRRE09IiwiQUdBemh1TXhSbkNEY2phYkJTbnR3a2syRE1Zb3BoYS9WWVhET1RjV2JnTT0iLCIvWm5xamVYQnQzczkvWkRrU05ubnJ5YmZWbHZCZnVFTkRhMlNaL0U5YmU4PSJdLCJzaWduYWxzIjp7fSwibWV0YSI6eyJ2IjoiNCIsImNoYWxsZW5nZV9pZCI6IjMwMGFhYzA3Y2RmM2JjNzY1YzNhZmZkNzAyZTVmNjUyMGJiMzQ1YjdiMjUxMTAyYjYxYjdkMWE0NjFlNjNmNTB2ejk1biIsInRpbWVzdGFtcCI6IjE3ODE1ODg4NjA0MjYiLCJkZWJ1ZyI6IkJKIiwib3JpZ2luIjoiaHR0cHM6Ly9kdWNrLmFpIiwic3RhY2siOiJFcnJvclxuYXQgbCAoaHR0cHM6Ly9kdWNrLmFpL2Rpc3QvZHVja2FpLWRpc3QvZW50cnkuZHVja2FpLjdiMzNkZDA4MzYzMjExNTA1NGE0LmpzOjI6MTQxNzIwNClcbmF0IGFzeW5jIGh0dHBzOi8vZHVjay5haS9kaXN0L2R1Y2thaS1kaXN0L2VudHJ5LmR1Y2thaS43YjMzZGQwODM2MzIxMTUwNTRhNC5qczoyOjEyNjU1MzMiLCJkdXJhdGlvbiI6IjE0MSJ9fQ=='
+        'x-vqd-hash-1': vqdHash
       },
       body: JSON.stringify(payload)
     });
-    
+
     if (!res.ok || !res.body) {
       return { error: `Duck.ai error: ${res.status}` };
     }
