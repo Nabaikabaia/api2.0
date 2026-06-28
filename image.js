@@ -63,7 +63,7 @@ export async function deepaiEdit(imageUrl, prompt, options = {}) {
         if (data?.output_url) {
           const editedRes = await fetch(data.output_url);
           const editedBuffer = await editedRes.arrayBuffer();
-          const base64 = btoa(String.fromCharCode(...new Uint8Array(editedBuffer)));
+          const base64 = bufferToBase64(editedBuffer);
           
           return {
             success: true,
@@ -91,6 +91,16 @@ export async function deepaiEdit(imageUrl, prompt, options = {}) {
 
 function reverse(s) {
   return s.split('').reverse().join('');
+}
+
+// Safe base64 encoding for large buffers (avoids call stack overflow)
+function bufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i += 8192) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + 8192, bytes.length)));
+  }
+  return btoa(binary);
 }
 
 // ==================== ILOVEIMG IMAGE UPSCALER ====================
@@ -189,7 +199,7 @@ export async function iloveimgUpscale(imageUrl, scale = 4, options = {}) {
     }
     
     const upscaledBuffer = await upscaleRes.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(upscaledBuffer)));
+    const base64 = bufferToBase64(upscaledBuffer);
     const dimensions = getImageDimensions(new Uint8Array(upscaledBuffer));
     
     return {
@@ -239,7 +249,8 @@ export async function pinterestSearch(query, options = {}) {
   const { limit = 10, scope = 'pins' } = options;
   
   try {
-    const homeRes = await fetch(CONFIG.ENDPOINTS.PINTEREST, {
+    const pinterestBase = 'https://www.pinterest.com';
+    const homeRes = await fetch(pinterestBase, {
       headers: buildHeaders({ 'Accept': 'text/html' })
     });
     const html = await homeRes.text();
@@ -259,13 +270,13 @@ export async function pinterestSearch(query, options = {}) {
       context: {}
     };
     
-    const url = `${CONFIG.ENDPOINTS.PINTEREST_API}/?source_url=${encodeURIComponent(sourceUrl)}&data=${encodeURIComponent(JSON.stringify(data))}&_=${Date.now()}`;
+    const apiUrl = `${pinterestBase}/resource/BaseSearchResource/get/?source_url=${encodeURIComponent(sourceUrl)}&data=${encodeURIComponent(JSON.stringify(data))}&_=${Date.now()}`;
     
-    const res = await fetch(url, {
+    const res = await fetch(apiUrl, {
       headers: {
         'accept': 'application/json, text/javascript, */*',
         'user-agent': CONFIG.UA_DESKTOP,
-        'referer': `https://id.pinterest.com${sourceUrl}`,
+        'referer': `${pinterestBase}${sourceUrl}`,
         'x-requested-with': 'XMLHttpRequest',
         'x-csrftoken': csrfToken,
         'cookie': cookies
@@ -493,7 +504,7 @@ export async function photoEnhancer(imageUrl, method = 1) {
     }
     
     const enhancedBuffer = await res.arrayBuffer();
-    const base64 = btoa(String.fromCharCode(...new Uint8Array(enhancedBuffer)));
+    const base64 = bufferToBase64(enhancedBuffer);
     
     return {
       success: true,
