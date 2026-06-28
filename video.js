@@ -287,13 +287,24 @@ async function tiktokDownloadMusicaldown(url) {
     const homeHtml = await homeRes.text();
     const cookies = homeRes.headers.getSetCookie?.()?.map(c => c.split(';')[0]).join('; ') || '';
 
-    // Extract CSRF-like hidden token (name changes per session)
-    const tokenMatch = homeHtml.match(/<input\s+name="([^"]+)"\s+type="hidden"\s+value="([a-f0-9]{30,})"/i)
-                    || homeHtml.match(/<input\s+type="hidden"\s+name="([^"]+)"\s+value="([a-f0-9]{30,})"/i);
-    if (!tokenMatch) return { error: 'musicaldown: token not found', provider: 'musicaldown' };
+    // Extract URL input field name (id="link_url" text input - name changes per deployment)
+    const urlFieldMatch = homeHtml.match(/name="([^"]+)"[^>]+id="link_url"/i)
+                       || homeHtml.match(/id="link_url"[^>]+name="([^"]+)"/i);
+    if (!urlFieldMatch) return { error: 'musicaldown: url field not found', provider: 'musicaldown' };
+    const urlFieldName = urlFieldMatch[1];
+
+    // Extract CSRF-like hidden token (name and value both change per session)
+    const tokenMatch = homeHtml.match(/name="([^"]+)"\s+type="hidden"\s+value="([a-f0-9]{28,})"/i)
+                    || homeHtml.match(/type="hidden"\s+name="([^"]+)"\s+value="([a-f0-9]{28,})"/i);
+    if (!tokenMatch) return { error: 'musicaldown: csrf token not found', provider: 'musicaldown' };
     const [, tokenName, tokenValue] = tokenMatch;
 
-    const form = new URLSearchParams({ [tokenName]: tokenValue, verify: '1', link: url });
+    const form = new URLSearchParams({
+      [urlFieldName]: url,
+      [tokenName]: tokenValue,
+      verify: '1'
+    });
+
     const dlRes = await fetch('https://musicaldown.com/download', {
       method: 'POST',
       headers: {
@@ -307,25 +318,28 @@ async function tiktokDownloadMusicaldown(url) {
     });
 
     const html = await dlRes.text();
-    if (html.includes('<!DOCTYPE') && !html.includes('download')) {
-      return { error: 'musicaldown returned error page', provider: 'musicaldown' };
+    if (!html || html.length < 100) {
+      return { error: 'musicaldown: empty download response', provider: 'musicaldown' };
     }
 
-    // Use RegExp constructor to avoid regex delimiter escaping issues with URLs
-    const noWmRe = new RegExp('href="(https://[^"]*(?:v19|tiktok|muscdn|tikcdn|cdn)[^"]*)"[^>]*>[^<]*(?:[Nn]o.watermark|without)', 'i');
-    const noWatermark = html.match(noWmRe)?.[1];
-
+    // Extract download links - musicaldown uses <a> tags with video CDN URLs
     const allLinksRe = new RegExp('href="(https://[^"]{30,})"', 'g');
     const allLinks = [...html.matchAll(allLinksRe)].map(m => m[1])
-      .filter(l => l.includes('cdn') || l.includes('tiktok') || l.includes('musical') || l.includes('muscdn') || l.includes('tikcdn') || l.includes('akamai'));
+      .filter(l => /(?:tiktok|muscdn|tikcdn|v19|v16|v[0-9]+-webapp|akamai|ttwcdn|byteimg|pstatp|snssdk|amemv)/.test(l));
 
-    const titleRe = new RegExp('<h2[^>]*>([^<]{3,100})<\/h2>', 'i');
+    // Also check data-url attributes
+    const dataUrlRe = new RegExp('data-url="(https://[^"]+)"', 'g');
+    const dataUrls = [...html.matchAll(dataUrlRe)].map(m => m[1]);
+
+    const videoLinks = [...allLinks, ...dataUrls].filter(Boolean);
+
+    const titleRe = new RegExp('<h2[^>]*>([^<]{3,120})<\/h2>', 'i');
     const authorRe = new RegExp('<h4[^>]*>([^<]{2,60})<\/h4>', 'i');
     const titleMatch = html.match(titleRe);
     const authorMatch = html.match(authorRe);
 
-    if (!allLinks.length && !noWatermark) {
-      return { error: 'musicaldown: no download links found', provider: 'musicaldown' };
+    if (!videoLinks.length) {
+      return { error: 'musicaldown: no video links in response', provider: 'musicaldown' };
     }
 
     return {
@@ -333,8 +347,8 @@ async function tiktokDownloadMusicaldown(url) {
       title: titleMatch?.[1]?.trim() || null,
       author: { username: authorMatch?.[1]?.trim() || null },
       videos: {
-        no_watermark: noWatermark || allLinks[0] || null,
-        with_watermark: allLinks[1] || null
+        no_watermark: videoLinks[0] || null,
+        with_watermark: videoLinks[1] || null
       },
       provider: 'musicaldown'
     };
@@ -342,6 +356,7 @@ async function tiktokDownloadMusicaldown(url) {
     return { error: error.message, provider: 'musicaldown' };
   }
 }
+
 
 
 // ==================== TIKTOK DOWNLOAD FALLBACK (douyin.wtf) ====================
