@@ -495,7 +495,12 @@ export async function googleTTS(text, lang = 'en') {
     }
     
     const audioBuffer = await res.arrayBuffer();
-    return btoa(String.fromCharCode(...new Uint8Array(audioBuffer)));
+    const bytes = new Uint8Array(audioBuffer);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 8192) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + 8192, bytes.length)));
+    }
+    return btoa(binary);
   } catch (error) {
     throw new Error(`TTS error: ${error.message}`);
   }
@@ -609,7 +614,8 @@ export async function mangaDistrictList(url) {
 
       if (!title || !link) return;
 
-      const poster = $el.find('.item-thumb img, .summary_image img').first().attr('src') || null;
+      const imgEl = $el.find('.item-thumb img, .summary_image img').first();
+      const poster = imgEl.attr('data-src') || imgEl.attr('data-lazy-src') || imgEl.attr('src') || null;
 
       let rating = null;
       const ratingText = $el.find('.score.font-meta.total_votes, .post-rating .score').text().trim();
@@ -689,8 +695,39 @@ export async function mangaDistrictList(url) {
       });
     });
 
+    // Fallback: search result pages use a different HTML structure
+    if (items.length === 0) {
+      // Try search result selectors (tab/card layout used on search pages)
+      $('.c-tabs-item, .row.c-tabs-item__content, .page-listing-item').each((i, el) => {
+        const $el = $(el);
+        const titleEl = $el.find('h3 a, h4 a, .post-title a, .h4 a').first();
+        const title = titleEl.text().trim();
+        const link = titleEl.attr('href');
+        if (!title || !link) return;
+        const imgEl2 = $el.find('img').first();
+        const poster2 = imgEl2.attr('data-src') || imgEl2.attr('data-lazy-src') || imgEl2.attr('src') || null;
+        const chapterEl2 = $el.find('.chapter a, .latest-chap a').first();
+        items.push({
+          title,
+          link: link.startsWith('http') ? link : MANGA_BASE + link,
+          poster: poster2,
+          rating: null,
+          status: null,
+          badges: [],
+          latestChapter: {
+            title: chapterEl2.text().trim() || null,
+            url: chapterEl2.attr('href') || null
+          },
+          updateTime: null,
+          views: null,
+          genres: [],
+          author: null
+        });
+      });
+    }
+
     let next = null;
-    const nextEl = $('.wp-pagenavi .page-numbers.next');
+    const nextEl = $('.wp-pagenavi .page-numbers.next, .nav-links .next');
     if (nextEl.length) next = nextEl.attr('href');
 
     const currentPage = parseInt($('.wp-pagenavi .page-numbers.current').text()) || 1;
@@ -726,7 +763,8 @@ export async function mangaDistrictDetail(slug) {
     const $ = cheerio.load(html);
 
     const title = $('.profile-manga .post-title h1').text().trim() || $('meta[property="og:title"]').attr('content') || '';
-    const poster = $('.profile-manga .summary_image img').first().attr('src') || null;
+    const posterEl = $('.profile-manga .summary_image img').first();
+    const poster = posterEl.attr('data-src') || posterEl.attr('data-lazy-src') || posterEl.attr('src') || null;
 
     const altNames = [];
     const altEl = $('.post-content_item:contains("Alternative") .summary-content');
