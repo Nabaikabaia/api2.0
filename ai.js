@@ -233,86 +233,17 @@ export async function perplexitySearch(query, options = {}, retryCount = 0) {
 // ==================== BLACKBOX.AI ====================
 
 export async function blackboxChat(prompt, sessionId = null, options = {}) {
-  const { webSearch = false, maxTokens = 1024 } = options;
-  
+  // blackbox.ai /api/chat now returns "Deprecated endpoint" for all requests.
+  // Routing to chatday.ai claude-3-haiku as a fully-capable replacement.
   try {
-    const homeRes = await fetch(CONFIG.ENDPOINTS.BLACKBOX + "/", {
-      headers: buildHeaders({ 'Accept': 'text/html' })
-    });
-    const html = await homeRes.text();
-    
-    let validated = CONFIG.FALLBACKS.BLACKBOX_FALLBACK_VALIDATED;
-    const uuidMatch = html.match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
-    if (uuidMatch) validated = uuidMatch[1];
-    
-    let session = sessionId ? sessionManager.get(sessionId) : null;
-    let history = session?.history || [];
-    
-    const systemPrompt = "Wrap your entire reply between <answer> and </answer> tags. Write nothing outside these tags.";
-    const userMessage = { id: randomId(), role: "user", content: String(prompt) };
-    const messages = [
-      { id: randomId(), role: "system", content: systemPrompt },
-      ...history,
-      userMessage
-    ];
-    
-    const payload = {
-      messages: messages,
-      userSelectedAgent: null,
-      userSelectedModel: null,
-      maxTokens: maxTokens,
-      validated: validated,
-      clickedForceWebSearch: webSearch,
-      webSearchModeOption: { autoMode: !webSearch, webMode: webSearch, offlineMode: false },
-      codeModelMode: true,
-      isPremium: false
-    };
-    
-    const res = await fetch(`${CONFIG.ENDPOINTS.BLACKBOX}/api/chat`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "origin": CONFIG.ENDPOINTS.BLACKBOX,
-        "referer": `${CONFIG.ENDPOINTS.BLACKBOX}/chat`,
-        "user-agent": CONFIG.UA_DESKTOP
-      },
-      body: JSON.stringify(payload)
-    });
-    
-    const raw = await res.text();
-    
-    if (res.status === 429) {
-      return { error: "Rate limited. Please try again later." };
-    }
-    
-    const answerMatch = raw.match(/<answer>([\s\S]*?)<\/answer>/);
-    let answer = answerMatch ? answerMatch[1].trim() : raw.trim();
-    
-    if (!answer || answer.toLowerCase().includes("deprecated") || answer.length < 5) {
-      try {
-        const jsonMatch = raw.match(/\{[\s\S]*\}/);
-        if (jsonMatch) {
-          const jsonData = JSON.parse(jsonMatch[0]);
-          if (jsonData.text) answer = jsonData.text;
-          if (jsonData.message) answer = jsonData.message;
-          if (jsonData.reply) answer = jsonData.reply;
-        }
-      } catch {}
-      
-      if (!answer || answer.toLowerCase().includes("deprecated") || answer.length < 5) {
-        answer = "I'm here to help! What would you like to know?";
-      }
-    }
-    
-    const assistantMessage = { id: randomId(), role: "assistant", content: answer };
-    const newHistory = [...history, userMessage, assistantMessage];
-    const newSessionId = sessionManager.create({ history: newHistory, validated });
-    
+    const result = await chatdayChat(prompt, 'claude3haiku', sessionId);
+    if (result.error) return { error: result.error };
     return {
-      reply: answer,
-      session: newSessionId
+      reply: result.result,
+      session: result.session || null,
+      model: 'claude-3-haiku',
+      provider: 'chatday'
     };
-    
   } catch (error) {
     return { error: error.message };
   }
@@ -505,83 +436,26 @@ export async function copilotChat(prompt, model = 'default') {
 // ==================== DUCK.AI ====================
 
 export async function duckChat(prompt, model = 'gpt-5-mini') {
+  // duck.ai now requires browser fingerprinting (returns 418) from server-side.
+  // Route through chatday.ai which supports equivalent models.
+  const modelMap = {
+    'gpt-5-mini': 'gpt4omini',
+    'gpt-4o-mini': 'gpt4omini',
+    'claude-3-haiku': 'claude3haiku',
+    'llama-3.3-70b': 'llama31405b',
+    'mixtral-8x7b': 'mistral8x7b',
+    'o4-mini': 'gpt4omini'
+  };
+  const chatdayModel = modelMap[model] || 'claude3haiku';
   try {
-    // Fetch fresh VQD hash from status endpoint
-    const statusRes = await fetch('https://duck.ai/duckchat/v1/status', {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
-        'x-vqd-accept': '1',
-        'Referer': 'https://duck.ai/',
-        'Origin': 'https://duck.ai'
-      }
-    });
-    const vqdHash = statusRes.headers.get('x-vqd-hash-1');
-    if (!vqdHash) return { error: 'Could not get VQD hash from duck.ai' };
-
-    const journeyId = randomString(32);
-    const messageId = randomUUID();
-    const conversationId = randomUUID();
-
-    const payload = {
-      model: model,
-      metadata: { toolChoice: { NewsSearch: false, VideosSearch: false, LocalSearch: false, WeatherForecast: false } },
-      messages: [{ role: "user", content: prompt }],
-      canUseTools: true,
-      reasoningEffort: "minimal",
-      canUseApproxLocation: null,
-      canDelegateImageGeneration: null
-    };
-
-    const res = await fetch('https://duck.ai/duckchat/v1/chat', {
-      method: 'POST',
-      headers: {
-        'accept': 'text/event-stream',
-        'content-type': 'application/json',
-        'origin': 'https://duck.ai',
-        'referer': 'https://duck.ai/',
-        'user-agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Mobile Safari/537.36',
-        'x-ddg-journey-id': journeyId,
-        'x-vqd-hash-1': vqdHash
-      },
-      body: JSON.stringify(payload)
-    });
-
-    if (!res.ok || !res.body) {
-      return { error: `Duck.ai error: ${res.status}` };
-    }
-    
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-    let fullReply = '';
-    
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-      
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          const jsonStr = line.slice(6).trim();
-          if (jsonStr === '[DONE]') continue;
-          try {
-            const parsed = JSON.parse(jsonStr);
-            if (parsed.message) {
-              fullReply += parsed.message;
-            }
-          } catch (e) {}
-        }
-      }
-    }
-    
+    const result = await chatdayChat(prompt, chatdayModel, null);
+    if (result.error) return { error: result.error };
     return {
-      result: fullReply.trim() || "No response from Duck.ai",
-      model: model
+      result: result.result,
+      model: chatdayModel,
+      session: result.session || null,
+      provider: 'chatday'
     };
-    
   } catch (error) {
     return { error: error.message };
   }
