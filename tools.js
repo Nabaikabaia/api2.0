@@ -949,16 +949,49 @@ export async function handleMangaHome(req, url) {
 
 export async function handleMangaSearch(req, url) {
   const query = url.searchParams.get('q');
-  const page = parseInt(url.searchParams.get('page') || '1');
-  
   if (!query) return errorResponse('Missing ?q=', 400);
-  
-  const result = await mangaDistrictList(
-    page === 1 
-      ? MANGA_BASE + `/?s=${encodeURIComponent(query)}&post_type=wp-manga`
-      : MANGA_BASE + `/page/${page}/?s=${encodeURIComponent(query)}&post_type=wp-manga`
-  );
-  return jsonResponse(result);
+
+  try {
+    // Use WordPress AJAX endpoint for reliable search (HTML search is AJAX-only)
+    const formData = new URLSearchParams({
+      action: 'wp-manga-search-manga',
+      title: query,
+      security: ''
+    });
+
+    const res = await fetch(`${MANGA_BASE}/wp-admin/admin-ajax.php`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-Requested-With': 'XMLHttpRequest',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Referer': MANGA_BASE + '/'
+      },
+      body: formData.toString()
+    });
+
+    const data = await res.json();
+
+    if (!data.success || !Array.isArray(data.data) || data.data.length === 0) {
+      return jsonResponse(clean({ creator: "NABEES", page: 'search', data: { query, count: 0, items: [] } }));
+    }
+
+    const items = data.data.map(item => ({
+      title: item.title || null,
+      link: item.url || null,
+      type: item.type || 'manga',
+      poster: null,
+      latestChapter: null
+    }));
+
+    return jsonResponse(clean({
+      creator: "NABEES",
+      page: 'search',
+      data: { query, count: items.length, items }
+    }));
+  } catch (error) {
+    return errorResponse(error.message, 500);
+  }
 }
 
 export async function handleMangaDetail(req, url) {
