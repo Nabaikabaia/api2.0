@@ -614,8 +614,15 @@ export async function mangaDistrictList(url) {
 
       if (!title || !link) return;
 
-      const imgEl = $el.find('.item-thumb img, .summary_image img').first();
-      const poster = imgEl.attr('data-src') || imgEl.attr('data-lazy-src') || imgEl.attr('src') || null;
+      // Real images are inside <noscript> tags (lazy loading); fall back to data-* attrs
+      const noscriptEl = $el.find('noscript');
+      const noscriptHtml = noscriptEl.html() || noscriptEl.text() || '';
+      const noscriptSrc = noscriptHtml.match(/src=["']([^"']+)["']/)?.[1];
+      const imgEl = $el.find('img').first();
+      const imgSrc = imgEl.attr('src');
+      const poster = (noscriptSrc && !noscriptSrc.startsWith('data:')) ? noscriptSrc
+        : imgEl.attr('data-src') || imgEl.attr('data-lazy-src') || imgEl.attr('data-mature-static')
+        || (imgSrc && !imgSrc.startsWith('data:') ? imgSrc : null) || null;
 
       let rating = null;
       const ratingText = $el.find('.score.font-meta.total_votes, .post-rating .score').text().trim();
@@ -763,8 +770,15 @@ export async function mangaDistrictDetail(slug) {
     const $ = cheerio.load(html);
 
     const title = $('.profile-manga .post-title h1').text().trim() || $('meta[property="og:title"]').attr('content') || '';
+    // Real poster is in noscript tag (lazy loading)
+    const noscriptDetail = $('.profile-manga .summary_image noscript');
+    const noscriptDetailHtml = noscriptDetail.html() || noscriptDetail.text() || '';
+    const noscriptDetailSrc = noscriptDetailHtml.match(/src=["']([^"']+)["']/)?.[1];
     const posterEl = $('.profile-manga .summary_image img').first();
-    const poster = posterEl.attr('data-src') || posterEl.attr('data-lazy-src') || posterEl.attr('src') || null;
+    const posterElSrc = posterEl.attr('src');
+    const poster = (noscriptDetailSrc && !noscriptDetailSrc.startsWith('data:')) ? noscriptDetailSrc
+      : posterEl.attr('data-src') || posterEl.attr('data-lazy-src') || posterEl.attr('data-mature-static')
+      || (posterElSrc && !posterElSrc.startsWith('data:') ? posterElSrc : null) || null;
 
     const altNames = [];
     const altEl = $('.post-content_item:contains("Alternative") .summary-content');
